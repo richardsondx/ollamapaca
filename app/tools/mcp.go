@@ -66,6 +66,10 @@ type MCPServerConfig struct {
 	Disabled bool              `json:"disabled,omitempty"`
 	// Timeout for one tool call, in seconds. Zero means 60.
 	ToolTimeoutSec int `json:"tool_timeout_sec,omitempty"`
+	// OAuth client for servers that need sign-in. Any HTTP server
+	// without an Authorization header can ask for sign-in; this only
+	// sets the client id, secret and scopes.
+	OAuth *MCPOAuthConfig `json:"oauth,omitempty"`
 }
 
 // Transport returns the effective transport name.
@@ -626,6 +630,7 @@ func (e *httpStatusError) Error() string {
 
 type httpTransport struct {
 	url       string
+	oauth     bool
 	headers   map[string]string
 	client    *http.Client
 	mu        sync.Mutex
@@ -637,9 +642,17 @@ type httpTransport struct {
 }
 
 func newHTTPTransport(cfg MCPServerConfig, logger *slog.Logger) *httpTransport {
+	headers := expandHeaderEnv(cfg.Headers)
+	hasAuth := false
+	for k := range headers {
+		if strings.EqualFold(k, "Authorization") {
+			hasAuth = true
+		}
+	}
 	return &httpTransport{
 		url:     cfg.URL,
-		headers: expandHeaderEnv(cfg.Headers),
+		oauth:   !hasAuth,
+		headers: headers,
 		client:  &http.Client{},
 		logger:  logger,
 	}
@@ -652,6 +665,29 @@ func (t *httpTransport) setProtocolVersion(v string) {
 }
 
 func (t *httpTransport) post(ctx context.Context, body []byte) (*http.Response, error) {
+	token := ""
+	if t.oauth {
+		var err error
+		if token, err = accessToken(ctx, t.url); err != nil {
+			return nil, err
+		}
+	}
+	resp, err := t.postWith(ctx, body, token)
+	var se *httpStatusError
+	if t.oauth && errors.As(err, &se) && se.status == http.StatusUnauthorized {
+		if token == "" {
+			return nil, ErrNeedsSignIn
+		}
+		// The token was rejected: refresh once and retry.
+		if token, err = forceRefresh(ctx, t.url); err != nil {
+			return nil, err
+		}
+		return t.postWith(ctx, body, token)
+	}
+	return resp, err
+}
+
+func (t *httpTransport) postWith(ctx context.Context, body []byte, token string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -660,6 +696,9 @@ func (t *httpTransport) post(ctx context.Context, body []byte) (*http.Response, 
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	t.mu.Lock()
 	if t.sessionID != "" {

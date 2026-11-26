@@ -25,8 +25,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -177,12 +179,15 @@ func (p *pluginService) specs() ([]tools.MCPServerSpec, error) {
 		if !pl.Enabled {
 			continue
 		}
+		values := p.settingsFor(pl.Name)
 		for name, srv := range pl.MCPServers {
+			cfg, setupErr := expandPluginServer(srv, pl.Settings, values)
 			specs = append(specs, tools.MCPServerSpec{
-				Key:    pl.Name + "/" + name,
-				Name:   name,
-				Plugin: pl.Name,
-				Config: pluginServerConfig(srv),
+				Key:        pl.Name + "/" + name,
+				Name:       name,
+				Plugin:     pl.Name,
+				Config:     cfg,
+				SetupError: setupErr,
 			})
 		}
 	}
@@ -193,11 +198,138 @@ func (p *pluginService) specs() ([]tools.MCPServerSpec, error) {
 	return specs, err
 }
 
-func pluginServerConfig(s plugins.MCPServer) tools.MCPServerConfig {
-	return tools.MCPServerConfig{
-		Type: s.Type, Command: s.Command, Args: s.Args, Env: s.Env, Cwd: s.Cwd,
-		URL: s.URL, Headers: s.Headers, Disabled: s.Disabled, ToolTimeoutSec: s.ToolTimeoutSec,
+var settingRef = regexp.MustCompile(`\$\{([A-Z][A-Z0-9_]*)\}`)
+
+// expandPluginServer fills ${NAME} references in a plugin's MCP server
+// from the plugin's settings (then the environment). A header or URL
+// query parameter whose reference is empty is dropped, so an optional
+// API key can be left blank. A required setting that is empty gives a
+// setup error instead of a server that would fail.
+func expandPluginServer(s plugins.MCPServer, settings []plugins.Setting, values map[string]string) (tools.MCPServerConfig, string) {
+	lookup := func(name string) string {
+		if v := strings.TrimSpace(values[name]); v != "" {
+			return v
+		}
+		return os.Getenv(name)
 	}
+	var missing []string
+	for _, st := range settings {
+		if st.Required && lookup(st.Name) == "" {
+			label := st.Label
+			if label == "" {
+				label = st.Name
+			}
+			missing = append(missing, label)
+		}
+	}
+	empty := false
+	expand := func(v string) string {
+		return settingRef.ReplaceAllStringFunc(v, func(m string) string {
+			val := lookup(m[2 : len(m)-1])
+			if val == "" {
+				empty = true
+			}
+			return val
+		})
+	}
+	cfg := tools.MCPServerConfig{
+		Type: s.Type, Command: expand(s.Command), Cwd: s.Cwd,
+		Disabled: s.Disabled, ToolTimeoutSec: s.ToolTimeoutSec,
+	}
+	for _, a := range s.Args {
+		cfg.Args = append(cfg.Args, expand(a))
+	}
+	if len(s.Env) > 0 {
+		cfg.Env = map[string]string{}
+		for k, v := range s.Env {
+			empty = false
+			if x := expand(v); !empty {
+				cfg.Env[k] = x
+			}
+		}
+	}
+	if len(s.Headers) > 0 {
+		cfg.Headers = map[string]string{}
+		for k, v := range s.Headers {
+			empty = false
+			if x := expand(v); !empty {
+				cfg.Headers[k] = x
+			}
+		}
+	}
+	if s.URL != "" {
+		cfg.URL = expand(s.URL)
+		if u, err := url.Parse(cfg.URL); err == nil && u.RawQuery != "" {
+			q := u.Query()
+			for k, vs := range q {
+				if len(vs) == 0 || vs[0] == "" {
+					q.Del(k)
+				}
+			}
+			u.RawQuery = q.Encode()
+			cfg.URL = u.String()
+		}
+	}
+	if s.OAuth != nil {
+		cfg.OAuth = &tools.MCPOAuthConfig{
+			ClientID:     expand(s.OAuth.ClientID),
+			ClientSecret: expand(s.OAuth.ClientSecret),
+			Scopes:       s.OAuth.Scopes,
+		}
+	}
+	if len(missing) > 0 {
+		return cfg, "Add " + strings.Join(missing, " and ") + " in this plugin's settings to use it."
+	}
+	return cfg, ""
+}
+
+func pluginSettingsFile() string {
+	return filepath.Join(ollamapacaHome(), "plugin-settings.json")
+}
+
+func (p *pluginService) allSettings() map[string]map[string]string {
+	out := map[string]map[string]string{}
+	if b, err := os.ReadFile(pluginSettingsFile()); err == nil {
+		_ = json.Unmarshal(b, &out)
+	}
+	return out
+}
+
+func (p *pluginService) settingsFor(plugin string) map[string]string {
+	if v := p.allSettings()[plugin]; v != nil {
+		return v
+	}
+	return map[string]string{}
+}
+
+func (p *pluginService) saveSettings(plugin string, values map[string]string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	all := p.allSettings()
+	cur := all[plugin]
+	if cur == nil {
+		cur = map[string]string{}
+	}
+	for k, v := range values {
+		if strings.TrimSpace(v) == "" {
+			delete(cur, k)
+		} else {
+			cur[k] = strings.TrimSpace(v)
+		}
+	}
+	all[plugin] = cur
+	b, err := json.MarshalIndent(all, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(pluginSettingsFile()), 0o700); err != nil {
+		return err
+	}
+	tmp := pluginSettingsFile() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, pluginSettingsFile())
 }
 
 func (p *pluginService) syncMCP() {
@@ -349,6 +481,11 @@ func (p *pluginService) registerTurnTools(ctx context.Context, registry *tools.R
 type pluginView struct {
 	plugins.Plugin
 	MCP []tools.MCPServerStatus `json:"mcp,omitempty"`
+	// SettingsSet says which settings have a value. Values of secret
+	// settings are never sent to the page.
+	SettingsSet    map[string]bool   `json:"settingsSet,omitempty"`
+	SettingsValues map[string]string `json:"settingsValues,omitempty"`
+	NeedsSetup     bool              `json:"needsSetup,omitempty"`
 }
 
 func (s *Server) listPlugins(w http.ResponseWriter, r *http.Request) error {
@@ -359,6 +496,24 @@ func (s *Server) listPlugins(w http.ResponseWriter, r *http.Request) error {
 	views := []pluginView{}
 	for _, pl := range p.reg.List() {
 		v := pluginView{Plugin: pl}
+		if len(pl.Settings) > 0 {
+			vals := p.settingsFor(pl.Name)
+			v.SettingsSet = map[string]bool{}
+			v.SettingsValues = map[string]string{}
+			for _, st := range pl.Settings {
+				val := vals[st.Name]
+				if val == "" {
+					val = os.Getenv(st.Name)
+				}
+				v.SettingsSet[st.Name] = val != ""
+				if !st.Secret && val != "" {
+					v.SettingsValues[st.Name] = val
+				}
+				if st.Required && val == "" {
+					v.NeedsSetup = true
+				}
+			}
+		}
 		for _, st := range status {
 			if st.Plugin == pl.Name {
 				v.MCP = append(v.MCP, st)
@@ -379,6 +534,8 @@ func (s *Server) pluginAction(w http.ResponseWriter, r *http.Request) error {
 	name, action := r.PathValue("name"), r.PathValue("action")
 	var ok bool
 	switch action {
+	case "settings", "signin", "signout":
+		return s.pluginAccount(w, r, name, action)
 	case "enable":
 		ok = p.reg.Enable(name)
 	case "disable":
@@ -398,6 +555,85 @@ func (s *Server) pluginAction(w http.ResponseWriter, r *http.Request) error {
 		go tools.SyncExecutorPlugin(context.Background(), tools.PluginExecutorURLFromEnv(), name, true)
 	}
 	return writeJSONResponse(w, map[string]any{"name": name, "enabled": action == "enable"})
+}
+
+// pluginAccount saves a plugin's settings, or signs its MCP server in
+// or out.
+func (s *Server) pluginAccount(w http.ResponseWriter, r *http.Request, name, action string) error {
+	p := s.plugins()
+	pl, ok := p.reg.Get(name)
+	if !ok {
+		http.Error(w, "unknown plugin", http.StatusNotFound)
+		return nil
+	}
+	switch action {
+	case "settings":
+		var body struct {
+			Values map[string]string `json:"values"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return nil
+		}
+		allowed := map[string]bool{}
+		for _, st := range pl.Settings {
+			allowed[st.Name] = true
+		}
+		for k := range body.Values {
+			if !allowed[k] {
+				http.Error(w, fmt.Sprintf("unknown setting %q", k), http.StatusBadRequest)
+				return nil
+			}
+		}
+		if err := p.saveSettings(name, body.Values); err != nil {
+			return err
+		}
+		p.syncMCP()
+		if pl.Enabled {
+			go p.warmUp()
+		}
+		return writeJSONResponse(w, map[string]any{"ok": true})
+	}
+	// Sign in or out of the plugin's first remote MCP server.
+	key := ""
+	for srvName, srv := range pl.MCPServers {
+		if srv.URL != "" {
+			key = name + "/" + srvName
+			break
+		}
+	}
+	if key == "" {
+		http.Error(w, "this plugin has no remote MCP server to sign in to", http.StatusBadRequest)
+		return nil
+	}
+	if !pl.Enabled {
+		http.Error(w, "enable the plugin first", http.StatusBadRequest)
+		return nil
+	}
+	p.syncMCP()
+	return s.mcpSignInOut(w, r, key, action)
+}
+
+func (s *Server) mcpSignInOut(w http.ResponseWriter, r *http.Request, key, action string) error {
+	p := s.plugins()
+	if action == "signout" {
+		if err := p.mcp.SignOut(key); err != nil {
+			return err
+		}
+		return writeJSONResponse(w, map[string]any{"ok": true})
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	authURL, err := p.mcp.SignIn(ctx, key)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		return json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+	}
+	// The desktop window cannot open new windows, so the app opens the
+	// sign-in page in the user's browser itself.
+	opened := tools.OpenInBrowser(authURL) == nil
+	return writeJSONResponse(w, map[string]any{"authUrl": authURL, "opened": opened})
 }
 
 func (s *Server) refreshPlugins(w http.ResponseWriter, r *http.Request) error {
@@ -536,6 +772,9 @@ func (s *Server) mcpAction(w http.ResponseWriter, r *http.Request) error {
 			defer cancel()
 			_, _ = p.mcp.Tools(ctx, name)
 		}
+	case "signin", "signout":
+		p.syncMCP()
+		return s.mcpSignInOut(w, r, name, action)
 	case "restart":
 		p.syncMCP()
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)

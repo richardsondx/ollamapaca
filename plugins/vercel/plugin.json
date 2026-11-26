@@ -1,0 +1,14 @@
+{
+  "name": "vercel",
+  "description": "Projects, deployments, build logs and docs on Vercel.",
+  "version": "0.1.0",
+  "homepage": "https://vercel.com/docs/mcp/vercel-mcp",
+  "settings": [],
+  "mcpServers": {
+    "vercel": {
+      "type": "http",
+      "url": "https://mcp.vercel.com",
+      "oauth": {}
+    }
+  }
+}

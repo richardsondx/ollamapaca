@@ -1,0 +1,25 @@
+{
+  "name": "github",
+  "description": "Repositories, issues, pull requests and Actions on GitHub.",
+  "version": "0.1.0",
+  "homepage": "https://github.com/github/github-mcp-server",
+  "settings": [
+    {
+      "name": "GITHUB_TOKEN",
+      "label": "GitHub personal access token",
+      "required": true,
+      "secret": true,
+      "url": "https://github.com/settings/personal-access-tokens",
+      "help": "A fine-grained token with access to the repositories you want the model to use."
+    }
+  ],
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_TOKEN}"
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "firecrawl",
+  "description": "Scrape, search, crawl and map websites with Firecrawl.",
+  "version": "0.1.0",
+  "homepage": "https://www.firecrawl.dev",
+  "settings": [
+    {
+      "name": "FIRECRAWL_API_KEY",
+      "label": "Firecrawl API key",
+      "secret": true,
+      "url": "https://www.firecrawl.dev/app/api-keys",
+      "help": "Optional. Scrape and search work without a key; crawl, map and agent need one."
+    }
+  ],
+  "mcpServers": {
+    "firecrawl": {
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp",
+      "headers": {
+        "Authorization": "Bearer ${FIRECRAWL_API_KEY}"
+      }
+    }
+  }
+}

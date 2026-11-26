@@ -17,6 +17,20 @@ Repositorio complementario: [ollama-plugin-seed](https://github.com/richardsondx
 - **Plugins de Codex y Claude.** Se cargan las carpetas con `.codex-plugin/plugin.json` o `.claude-plugin/plugin.json`, con sus servidores `.mcp.json` y sus skills.
 - **Menciones con `@`.** Escribe `@browser` o `@<servidor-mcp>` en el chat para dar al modelo solo esas herramientas en un mensaje.
 
+## Plugins incluidos
+
+Todos vienen con la app y están **desactivados hasta que los actives** en la página Plugins. Los que necesitan una clave o iniciar sesión muestran un formulario y un botón **Connect**.
+
+- Sin configuración: `cred` (datos económicos de Canadá), `exa` (búsqueda web y de código), `firecrawl` (extraer y buscar en la web)
+- Inicia sesión con Connect: `vercel`, `evidence` (o con clave de API)
+- Con clave: `github` (token de acceso personal), `dispatch`, `expedia` (además necesita uv)
+- Con tu propio cliente OAuth de Google y luego Connect: `gmail`, `google-calendar`, `google-drive`
+- Y además `browser` y `computer`
+
+Las claves que introduces se guardan solo en tu Mac (`~/.ollamapaca/plugin-settings.json`) y los tokens de sesión en `~/.ollamapaca/oauth.json`; solo tú puedes leer ambos archivos.
+
+Prueba uno que no necesita nada: activa **cred** y pregunta `@cred ¿cómo ha cambiado el IPC de Canadá interanualmente desde 2023?`
+
 ## Inicio rápido (Mac)
 
 1. **Compila y abre la app**, con Go 1.26 y Node 22:

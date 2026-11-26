@@ -1,0 +1,13 @@
+{
+  "name": "cred",
+  "description": "Canadian economic data from Statistics Canada and the Bank of Canada.",
+  "version": "0.1.0",
+  "homepage": "https://cred.nshipyard.com",
+  "settings": [],
+  "mcpServers": {
+    "cred": {
+      "type": "http",
+      "url": "https://cred.nshipyard.com/mcp"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "exa",
+  "description": "Web search, code search and page contents with Exa.",
+  "version": "0.1.0",
+  "homepage": "https://exa.ai",
+  "settings": [
+    {
+      "name": "EXA_API_KEY",
+      "label": "Exa API key",
+      "secret": true,
+      "url": "https://dashboard.exa.ai/api-keys",
+      "help": "Optional. Without a key, Exa may ask you to sign in, or apply rate limits."
+    }
+  ],
+  "mcpServers": {
+    "exa": {
+      "type": "http",
+      "url": "https://mcp.exa.ai/mcp?exaApiKey=${EXA_API_KEY}"
+    }
+  }
+}

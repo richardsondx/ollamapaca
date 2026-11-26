@@ -17,6 +17,30 @@ Companion repo: [ollama-plugin-seed](https://github.com/richardsondx/ollama-plug
 - **Codex and Claude plugins.** Folders with `.codex-plugin/plugin.json` or `.claude-plugin/plugin.json` load, with their bundled `.mcp.json` servers and skills.
 - **`@` mentions.** Type `@browser` or `@<mcp-server>` in chat to give the model only those tools for one message.
 
+## Bundled plugins
+
+All of these ship with the app and are **off until you enable them** on the Plugins page. Plugins that need a key or a sign-in show a setup form and a **Connect** button.
+
+| Plugin | What it does | What you need |
+| --- | --- | --- |
+| `browser` | Your Chrome: tabs, pages, clicks, typing | Chrome extension |
+| `computer` | Mac apps: open, type, press keys | Dry run until real mode is on |
+| `cred` | Canadian economic data (Statistics Canada, Bank of Canada) | Nothing |
+| `exa` | Web and code search | Nothing (optional API key) |
+| `firecrawl` | Scrape, search and crawl websites | Nothing (optional API key) |
+| `evidence` | Verified charts and figures for financial research | Connect (sign in) or API key |
+| `vercel` | Projects, deployments and logs | Connect (sign in) |
+| `github` | Repositories, issues, pull requests, Actions | Personal access token |
+| `dispatch` | Newsletters: publications, subscribers, issues | API key |
+| `expedia` | Hotel, flight, activity and car recommendations | API key, and uv installed |
+| `gmail` | Search, read, label and draft email | Your Google OAuth client, then Connect |
+| `google-calendar` | Read and manage events | Your Google OAuth client, then Connect |
+| `google-drive` | Search, read and organize files | Your Google OAuth client, then Connect |
+
+Keys you enter are saved only on your Mac, in `~/.ollamapaca/plugin-settings.json`, and sign-in tokens in `~/.ollamapaca/oauth.json`. Both files are readable only by you.
+
+Try one that needs nothing: enable **cred**, then ask `@cred how has Canada's CPI changed year over year since 2023?`
+
 ## Quick start (Mac)
 
 1. **Build and open the app**, with Go 1.26 and Node 22:
