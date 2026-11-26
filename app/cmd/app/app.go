@@ -292,7 +292,16 @@ func main() {
 		slog.Debug("background desktop server done")
 	}()
 
-	upd.StartBackgroundUpdaterChecker(ctx, UpdateAvailable)
+	// Ollamapaca has no update server. The upstream checker would offer
+	// stock Ollama releases from ollama.com and replace this app with
+	// them, so it stays off unless OLLAMAPACA_UPDATE_URL points at a
+	// feed that serves Ollamapaca builds.
+	if feed := os.Getenv("OLLAMAPACA_UPDATE_URL"); feed != "" {
+		updater.UpdateCheckURLBase = feed
+		upd.StartBackgroundUpdaterChecker(ctx, UpdateAvailable)
+	} else {
+		slog.Info("update checks are off for Ollamapaca")
+	}
 
 	// Check for pending updates on startup (show tray notification if update is ready)
 	if updater.IsUpdatePending() {

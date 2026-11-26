@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	pidFile       = filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "Ollama", "ollama.pid")
+	pidFile       = filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "Ollamapaca", "ollama.pid")
 	serverLogPath = filepath.Join(os.Getenv("HOME"), ".ollama", "logs", "server.log")
 )
 
