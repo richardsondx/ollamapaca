@@ -82,6 +82,9 @@ type Plugin struct {
 	// Settings the user can fill in, and where to learn more.
 	Settings []Setting `json:"settings,omitempty"`
 	Homepage string    `json:"homepage,omitempty"`
+	// Icon is an image file in the plugin folder (png, svg, jpg,
+	// webp), shown on the Plugins page and in the @ picker.
+	Icon string `json:"icon,omitempty"`
 }
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
@@ -153,6 +156,7 @@ func loadPlugin(dir string) (Plugin, error) {
 		MCPServers  json.RawMessage `json:"mcpServers"`
 		Settings    []Setting       `json:"settings"`
 		Homepage    string          `json:"homepage"`
+		Icon        string          `json:"icon"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return p, fmt.Errorf("invalid plugin.json in %s: %w", dir, err)
@@ -212,8 +216,38 @@ func loadPlugin(dir string) (Plugin, error) {
 		Instructions: instructions,
 		Settings:     raw.Settings,
 		Homepage:     raw.Homepage,
+		Icon:         validIcon(dir, raw.Icon),
 	}
 	return p, nil
+}
+
+// validIcon keeps an icon path only when it names an image file that
+// exists inside the plugin folder. A bad icon never fails the plugin.
+func validIcon(dir, icon string) string {
+	if icon == "" {
+		return ""
+	}
+	switch strings.ToLower(filepath.Ext(icon)) {
+	case ".png", ".svg", ".jpg", ".jpeg", ".webp":
+	default:
+		return ""
+	}
+	clean := filepath.Clean(icon)
+	if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+		return ""
+	}
+	if st, err := os.Stat(filepath.Join(dir, clean)); err != nil || st.IsDir() {
+		return ""
+	}
+	return filepath.ToSlash(clean)
+}
+
+// IconPath returns the icon file on disk, or "" when there is none.
+func (p Plugin) IconPath() string {
+	if p.Icon == "" || p.Dir == "" {
+		return ""
+	}
+	return filepath.Join(p.Dir, filepath.FromSlash(p.Icon))
 }
 
 // loadSkills reads SKILL.md at the plugin root (required for the

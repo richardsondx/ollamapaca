@@ -3,6 +3,7 @@
   "description": "Newsletters for agents: publications, subscribers, issues and sends.",
   "version": "0.1.0",
   "homepage": "https://dispatch.nshipyard.com",
+  "icon": "icon.png",
   "settings": [
     {
       "name": "DISPATCH_API_KEY",

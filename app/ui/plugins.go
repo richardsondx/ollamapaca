@@ -636,6 +636,26 @@ func (s *Server) mcpSignInOut(w http.ResponseWriter, r *http.Request, key, actio
 	return writeJSONResponse(w, map[string]any{"authUrl": authURL, "opened": opened})
 }
 
+// pluginIcon serves a plugin's bundled icon file.
+func (s *Server) pluginIcon(w http.ResponseWriter, r *http.Request) error {
+	pl, ok := s.plugins().reg.Get(r.PathValue("name"))
+	path := ""
+	if ok {
+		path = pl.IconPath()
+	}
+	if path == "" {
+		http.NotFound(w, r)
+		return nil
+	}
+	types := map[string]string{".png": "image/png", ".svg": "image/svg+xml", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+	w.Header().Set("Content-Type", types[strings.ToLower(filepath.Ext(path))])
+	w.Header().Set("Cache-Control", "max-age=3600")
+	// SVG icons cannot run scripts when served with this policy.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	http.ServeFile(w, r, path)
+	return nil
+}
+
 func (s *Server) refreshPlugins(w http.ResponseWriter, r *http.Request) error {
 	p := s.plugins()
 	p.reg.Refresh()

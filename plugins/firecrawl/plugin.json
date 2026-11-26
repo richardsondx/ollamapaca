@@ -3,6 +3,7 @@
   "description": "Scrape, search, crawl and map websites with Firecrawl.",
   "version": "0.1.0",
   "homepage": "https://www.firecrawl.dev",
+  "icon": "icon.png",
   "settings": [
     {
       "name": "FIRECRAWL_API_KEY",

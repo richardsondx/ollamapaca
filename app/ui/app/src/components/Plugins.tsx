@@ -39,7 +39,32 @@ const MONOGRAMS: Record<string, [string, string]> = {
 
 type Tab = "plugins" | "skills" | "installed" | "mcp";
 
+// Plugins whose bundled icon failed to load (no icon file, or an MCP
+// server that is not a plugin), so the page does not ask again.
+const missingIcons = new Set<string>();
+
 export function PluginIcon({ name, size = 32 }: { name: string; size?: number }) {
+  const [failed, setFailed] = useState(missingIcons.has(name));
+  if (!failed && name !== "browser" && name !== "computer") {
+    return (
+      <img
+        src={`${API_BASE}/api/plugins/${encodeURIComponent(name)}/icon`}
+        alt=""
+        width={size}
+        height={size}
+        style={{ width: size, height: size }}
+        className="rounded-[22%] object-contain"
+        onError={() => {
+          missingIcons.add(name);
+          setFailed(true);
+        }}
+      />
+    );
+  }
+  return <DrawnPluginIcon name={name} size={size} />;
+}
+
+function DrawnPluginIcon({ name, size }: { name: string; size: number }) {
   const common = { width: size, height: size, viewBox: "0 0 48 48" } as const;
   if (name === "browser") {
     return (

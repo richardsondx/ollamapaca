@@ -296,6 +296,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/plugins/refresh", handle(s.refreshPlugins))
 	mux.Handle("GET /api/plugins/skills", handle(s.listPluginSkills))
 	mux.Handle("POST /api/plugins/{name}/{action}", handle(s.pluginAction))
+	mux.Handle("GET /api/plugins/{name}/icon", handle(s.pluginIcon))
 	mux.Handle("GET /api/tools", handle(s.listPluginTools))
 	mux.Handle("GET /api/v1/mcp", handle(s.listMCP))
 	mux.Handle("POST /api/v1/mcp", handle(s.addMCP))

@@ -3,6 +3,7 @@
   "description": "Read and manage your Google Calendar events.",
   "version": "0.1.0",
   "homepage": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+  "icon": "icon.png",
   "settings": [
     {
       "name": "GOOGLE_OAUTH_CLIENT_ID",
