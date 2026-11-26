@@ -3,6 +3,7 @@
   "description": "Hotel, flight, activity and car rental recommendations from Expedia.",
   "version": "0.1.0",
   "homepage": "https://github.com/ExpediaGroup/expedia-travel-recommendations-mcp",
+  "icon": "icon.png",
   "settings": [
     {
       "name": "EXPEDIA_API_KEY",

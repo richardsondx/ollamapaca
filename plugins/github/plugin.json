@@ -3,6 +3,7 @@
   "description": "Repositories, issues, pull requests and Actions on GitHub.",
   "version": "0.1.0",
   "homepage": "https://github.com/github/github-mcp-server",
+  "icon": "icon.png",
   "settings": [
     {
       "name": "GITHUB_TOKEN",

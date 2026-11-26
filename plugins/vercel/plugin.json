@@ -3,6 +3,7 @@
   "description": "Projects, deployments, build logs and docs on Vercel.",
   "version": "0.1.0",
   "homepage": "https://vercel.com/docs/mcp/vercel-mcp",
+  "icon": "icon.png",
   "settings": [],
   "mcpServers": {
     "vercel": {

@@ -29,3 +29,21 @@ func TestBundledPresets(t *testing.T) {
 		t.Fatalf("OAuth presets lost their oauth block")
 	}
 }
+
+func TestBundledIcons(t *testing.T) {
+	reg := NewRegistry(".")
+	withIcon := map[string]bool{}
+	for _, p := range reg.List() {
+		if p.Icon != "" {
+			withIcon[p.Name] = true
+		}
+	}
+	for _, name := range []string{"firecrawl", "exa", "dispatch", "vercel", "github", "expedia", "gmail", "google-calendar", "google-drive"} {
+		if !withIcon[name] {
+			t.Fatalf("%s should have its bundled icon", name)
+		}
+	}
+	if got := validIcon(".", "../plugin.go"); got != "" {
+		t.Fatalf("an icon outside the plugin folder must be rejected, got %q", got)
+	}
+}

@@ -3,6 +3,7 @@
   "description": "Web search, code search and page contents with Exa.",
   "version": "0.1.0",
   "homepage": "https://exa.ai",
+  "icon": "icon.png",
   "settings": [
     {
       "name": "EXA_API_KEY",
