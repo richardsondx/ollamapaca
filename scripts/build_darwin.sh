@@ -227,6 +227,22 @@ _build_macapp() {
     ln -s Versions/Current/Resources dist/Ollamapaca.app/Contents/Frameworks/Squirrel.framework/Resources
     ln -s Versions/Current/Squirrel dist/Ollamapaca.app/Contents/Frameworks/Squirrel.framework/Squirrel
 
+    # Bundled plugins (browser, computer). The app also loads plugins
+    # from ~/.ollamapaca/plugins, which win on a name clash.
+    mkdir -p dist/Ollamapaca.app/Contents/Resources
+    rm -rf dist/Ollamapaca.app/Contents/Resources/plugins
+    cp -R ./plugins dist/Ollamapaca.app/Contents/Resources/plugins
+    find dist/Ollamapaca.app/Contents/Resources/plugins -name '*.go' -delete
+
+    # Optional: bundle the plugin executor (ollama-plugin-seed), which
+    # drives the Chrome extension and the Mac computer adapter. The app
+    # starts it on demand. Set OLLAMAPACA_SEED_DIR to its checkout.
+    if [ -n "${OLLAMAPACA_SEED_DIR:-}" ] && [ -f "${OLLAMAPACA_SEED_DIR}/scripts/run_server.py" ]; then
+        rm -rf dist/Ollamapaca.app/Contents/Resources/seed
+        mkdir -p dist/Ollamapaca.app/Contents/Resources/seed
+        (cd "${OLLAMAPACA_SEED_DIR}" && tar --exclude .git --exclude data --exclude __pycache__ -cf - .) | (cd dist/Ollamapaca.app/Contents/Resources/seed && tar -xf -)
+    fi
+
     # Update the version in the Info.plist
     plutil -replace CFBundleShortVersionString -string "$VERSION" dist/Ollamapaca.app/Contents/Info.plist
     plutil -replace CFBundleVersion -string "$VERSION" dist/Ollamapaca.app/Contents/Info.plist

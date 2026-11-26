@@ -78,7 +78,7 @@ type claudeDesktopController interface {
 
 var (
 	isApp              = updater.BundlePath != ""
-	appLogPath         = filepath.Join(os.Getenv("HOME"), ".ollama", "logs", "app.log")
+	appLogPath         = filepath.Join(os.Getenv("HOME"), ".ollama", "logs", "ollamapaca-app.log")
 	launchAgentPath    = filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.ollama.ollama.plist")
 	claudeAppProxy     *proxy.ClaudeDesktop
 	claudeProxyStartMu sync.Mutex
@@ -483,8 +483,14 @@ func installSymlink() {
 	cliPath := C.CString(ollamaPath)
 	defer C.free(unsafe.Pointer(cliPath))
 
-	// Check the users path first
+	// Check the users path first. Ollamapaca runs next to an installed
+	// Ollama, so an ollama CLI that is already on PATH is left alone:
+	// repointing it would take it away from the other app.
 	cmd, _ := exec.LookPath("ollama")
+	if cmd != "" {
+		slog.Info("an ollama CLI is already on PATH, not replacing it", "cli", cmd)
+		return
+	}
 	if cmd != "" {
 		resolved, err := os.Readlink(cmd)
 		if err == nil {

@@ -45,8 +45,8 @@ func TestPluginToolBrowserTimeoutIsLonger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if browser.client.Timeout != 30*time.Second {
-		t.Fatalf("browser timeout = %v, want 30s", browser.client.Timeout)
+	if browser.client.Timeout != 60*time.Second {
+		t.Fatalf("browser timeout = %v, want 60s", browser.client.Timeout)
 	}
 	other, err := NewPluginTool("computer", "click", "Click.", nil, "")
 	if err != nil {

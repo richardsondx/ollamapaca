@@ -1681,7 +1681,7 @@ didCompleteWithError:(NSError *)error {
             CFStringRef displayName = LSSharedFileListItemCopyDisplayName((LSSharedFileListItemRef)item);
             if (displayName) {
                 NSString *name = (__bridge NSString *)displayName;
-                if ([name hasPrefix:@"Ollamapaca"] || [name hasPrefix:@"Ollama"]) {
+                if ([name hasPrefix:@"Ollamapaca"]) {
                     LSSharedFileListItemRemove(loginItems, (LSSharedFileListItemRef)item);
                     appLogInfo([NSString stringWithFormat:@"removing dangling login item %@", displayName]);
                 }
@@ -1901,9 +1901,10 @@ static BOOL isOllamaApplication(NSRunningApplication *app) {
     if (bundleId == nil || bundleId.length == 0) {
         return NO;
     }
+    // Only other copies of Ollamapaca. The stock Ollama app
+    // (ai.ollama.ollama, com.electron.ollama) can run alongside, and
+    // must never be quit by this app.
     return [bundleId isEqualToString:[[NSBundle mainBundle] bundleIdentifier]] ||
-        [bundleId isEqualToString:@"ai.ollama.ollama"] ||
-        [bundleId isEqualToString:@"com.electron.ollama"] ||
         [bundleId isEqualToString:@"ai.ollamapaca.app"];
 }
 

@@ -3,6 +3,7 @@ package plugins
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 )
@@ -12,6 +13,7 @@ import (
 type Registry struct {
 	mu        sync.Mutex
 	Root      string
+	Roots     []string
 	statePath string
 	plugins   map[string]Plugin
 	errors    map[string]string
@@ -30,8 +32,18 @@ func NewRegistry(root string) *Registry {
 // A state file that lists a plugin that no longer exists is
 // ignored, it does not create a plugin.
 func NewRegistryWithState(root, statePath string) *Registry {
-	plugins, errs := Discover(root)
-	r := &Registry{Root: root, statePath: statePath, plugins: plugins, errors: errs, enabled: map[string]bool{}}
+	return NewRegistryWithRoots([]string{root}, statePath)
+}
+
+// NewRegistryWithRoots is NewRegistryWithState over several plugin
+// folders, searched in order.
+func NewRegistryWithRoots(roots []string, statePath string) *Registry {
+	plugins, errs := DiscoverAll(roots)
+	root := ""
+	if len(roots) > 0 {
+		root = roots[0]
+	}
+	r := &Registry{Root: root, Roots: roots, statePath: statePath, plugins: plugins, errors: errs, enabled: map[string]bool{}}
 	if statePath != "" {
 		if data, err := os.ReadFile(statePath); err == nil {
 			var state struct {
@@ -54,7 +66,11 @@ func NewRegistryWithState(root, statePath string) *Registry {
 // Enabled state is kept for plugins that still exist, and
 // dropped for plugins that were removed.
 func (r *Registry) Refresh() {
-	plugins, errs := Discover(r.Root)
+	roots := r.Roots
+	if len(roots) == 0 {
+		roots = []string{r.Root}
+	}
+	plugins, errs := DiscoverAll(roots)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.plugins = plugins
@@ -120,6 +136,15 @@ func (r *Registry) Disable(name string) bool {
 		_ = r.SaveState(r.statePath)
 	}
 	return true
+}
+
+// Get returns one plugin, with Enabled set.
+func (r *Registry) Get(name string) (Plugin, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.plugins[name]
+	p.Enabled = r.enabled[name]
+	return p, ok
 }
 
 // IsEnabled reports whether a plugin is enabled.
@@ -197,6 +222,9 @@ func (r *Registry) SaveState(path string) error {
 	sort.Strings(names)
 	data, err := json.Marshal(map[string]interface{}{"enabled": names})
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)

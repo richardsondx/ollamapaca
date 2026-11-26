@@ -2,51 +2,142 @@
 
 # Ollamapaca
 
-Ollamapaca is Ollama plus Alpaca, a fusion of plugins and skills. Ollamapaca is Ollama, with plugins. This is a fork of ollama/ollama, not upstream Ollama. It adds a plugin loader, a Plugins page inside the desktop app, and a companion seed for a Chrome WebMCP plugin, so an open model can use browser, computer, and skill plugins locally, without a hosted service. The repo is https://github.com/richardsondx/ollamapaca, branch main, and the packaged Mac bundle is Ollamapaca.app, bundle id ai.ollamapaca.app. The server binary is still ollama, and the Go module is still github.com/ollama/ollama.
+**English** · [简体中文](README.zh-CN.md) · [Español](README.es.md) · [Français](README.fr.md) · [日本語](README.ja.md)
 
-Companion seed: https://github.com/richardsondx/ollama-plugin-seed, the plugin set, the Chrome extension, and the local plugin server that executes plugin tools.
+Ollamapaca is Ollama with plugins. A local, open model can control your real Chrome, use any MCP server, and load Codex and Claude plugins, all on your machine, with no hosted service.
 
-## See it in use
+It is a fork of [ollama/ollama](https://github.com/ollama/ollama). The Mac app is `Ollamapaca.app` (bundle id `ai.ollamapaca.app`). It runs next to a normal Ollama install: it reuses the Ollama server that is already running, shares your models, and keeps its own chats.
 
-Real screenshots of the Ollamapaca app running on a Mac, not mockups. Click an image to see it full size.
+Companion repo: [ollama-plugin-seed](https://github.com/richardsondx/ollama-plugin-seed), with the Chrome extension and the local plugin executor.
+
+## What you get
+
+- **Browser control of your real Chrome.** The model opens tabs, reads pages, clicks, types, presses keys and scrolls through the Ollamapaca Chrome extension. No `--remote-debugging-port` needed.
+- **MCP servers, like Codex and Claude.** Add any local (stdio) or remote (streamable HTTP or SSE) MCP server on **Plugins → MCP**, or paste an `mcpServers` JSON snippet.
+- **Codex and Claude plugins.** Folders with `.codex-plugin/plugin.json` or `.claude-plugin/plugin.json` load, with their bundled `.mcp.json` servers and skills.
+- **`@` mentions.** Type `@browser` or `@<mcp-server>` in chat to give the model only those tools for one message.
+
+## Quick start (Mac)
+
+1. **Build and open the app**, with Go 1.26 and Node 22:
+
+   ```bash
+   git clone https://github.com/richardsondx/ollamapaca && cd ollamapaca
+   (cd app/ui/app && npm install && npm run build)
+   go build -o Ollamapaca ./app/cmd/app && ./Ollamapaca
+   ```
+
+   Keep Ollama running (the app or `ollama serve`). Ollamapaca uses it.
+
+2. **Get the plugin executor**, which the app starts on its own when it is needed:
+
+   ```bash
+   git clone https://github.com/richardsondx/ollama-plugin-seed ~/.ollamapaca/seed
+   ```
+
+3. **Load the Chrome extension.** Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick `~/.ollamapaca/seed/chrome-extension` (press Cmd+Shift+G in the folder picker to paste the path). Its popup should say it is connected.
+
+4. **Enable the browser plugin.** In Ollamapaca, open **Plugins**, select **browser**, and click **Enable**.
+
+5. **Pick a model that can call tools**, for example `qwen3`, `qwen2.5:7b-instruct`, `llama3.1`, `gpt-oss`, or a cloud model such as `glm-5.2:cloud`. The Plugins page lists which of your installed models can call tools.
+
+## Try it: prompts to copy and paste
+
+Each prompt below should make the model act in your Chrome. You see the tab open, and the chat shows each step (open, click, type) with a Details toggle, then the answer.
+
+**Browser**
+
+```text
+@browser open news.ycombinator.com and tell me the top story
+```
+
+```text
+@browser go to en.wikipedia.org, search for "Alpaca", and give me the first sentence of the article
+```
+
+```text
+@browser open github.com/ollama/ollama and tell me how many stars it has
+```
+
+```text
+@browser open duckduckgo.com, search for "best hiking trails near Montreal", and list the first three results
+```
+
+```text
+@browser list my open tabs, then switch to the one about GitHub
+```
+
+**MCP**
+
+On **Plugins → MCP**, choose **Paste JSON**, paste this, and click **Add and connect**:
+
+```json
+{
+  "mcpServers": {
+    "memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] }
+  }
+}
+```
+
+When it shows **Ready**, try:
+
+```text
+@memory remember that my favourite animal is the alpaca
+```
+
+```text
+@memory what is my favourite animal?
+```
+
+A remote server works the same way: choose **URL** and enter its address, for example `https://example.com/mcp`.
+
+**Computer (Mac)**
+
+```text
+@computer list the apps I can control
+```
+
+Computer actions are a dry run unless you turn on real mode. See [docs/PLUGINS-AND-MCP.md](docs/PLUGINS-AND-MCP.md).
+
+### Prove it with a test
+
+The repo has an end-to-end test that sends a real prompt through the app's chat code to a real model, with the real plugins:
+
+```bash
+OLLAMAPACA_E2E_MODEL=qwen2.5:7b-instruct OLLAMAPACA_E2E_PLUGINS=browser \
+OLLAMAPACA_E2E_PROMPT='@browser go to en.wikipedia.org, search for "Llama", and tell me the first sentence of the article' \
+go test ./app/ui -run TestPluginChatEndToEnd -v
+```
+
+It prints each tool call, each result, and the model's answer, and fails if the model called no tools. For a browser prompt, the executor must be running and the Chrome extension connected.
+
+## Screenshots
 
 <a href="docs/images/ollamapaca-chat.png"><img src="docs/images/ollamapaca-chat.png" width="600" alt="Ollamapaca chat on a Mac, with the @ picker showing browser and computer plugins"></a>
 
-Chat with the @ picker: type @ and pick browser or computer for that turn.
+Chat with the `@` picker.
 
-<a href="docs/images/ollamapaca-plugins-browser.png"><img src="docs/images/ollamapaca-plugins-browser.png" width="600" alt="Ollamapaca Plugins page on a Mac, browser plugin enabled with 5 tools"></a>
+<a href="docs/images/ollamapaca-plugins-browser.png"><img src="docs/images/ollamapaca-plugins-browser.png" width="600" alt="Ollamapaca Plugins page on a Mac with the browser plugin"></a>
 
-Plugins page, browser plugin enabled, 5 tools.
+The Plugins page.
 
-<a href="docs/images/ollamapaca-plugins-computer.png"><img src="docs/images/ollamapaca-plugins-computer.png" width="600" alt="Ollamapaca Plugins page on a Mac, computer plugin enabled with 7 tools"></a>
+## Limits
 
-Plugins page, computer plugin enabled, 7 tools.
+- Pages are read as text and numbered element lists. No screenshots go to the model, and iframes and shadow DOM are not listed yet.
+- Small models sometimes write tool calls that stock Ollama cannot parse when a tool has a very long description. The app shortens descriptions and retries, but a stronger tool-calling model is the real fix.
+- No CLI plugin commands yet.
 
-## Set it up with Codex
+## Security defaults
 
-Copy the prompt in docs/SETUP-WITH-CODEX.md into Codex. That prompt is local only: no push, no deploy, no publish, no send, no pay, no delete. It tells Codex to clone this branch if it does not already have a local copy with the Plugins UI, then build the fork server and the desktop UI, prove the API, prove the desktop Plugins page, set up the seed server on 127.0.0.1:11435, and test WebMCP locally on http://localhost:3000 only.
+- Plugins are off until you enable them. A disabled plugin gives the model no tools.
+- Browser control runs only through the Chrome extension you load yourself, talks only to 127.0.0.1, and can be switched off in its popup. It never reads cookies or saved passwords and never returns password field values.
+- Computer actions are a dry run by default. Real Mac control needs `OLLAMA_COMPUTER_USE_REAL=1` and Accessibility permission, and risky actions still ask for confirmation.
+- Text from web pages and tools is data, never instructions. It cannot add a plugin, a destination or a permission.
 
-## What works today
+## More
 
-- Plugin folder loads, lists on GET /api/plugins, enables and disables, appears on GET /api/tools, enable state survives restart, and new plugins appear on refresh.
-- Desktop Plugins page with Plugins, Skills, and Installed, an @ picker in chat that picks one enabled plugin for that turn, and live model detection showing which installed models can call tools.
-- Chat calls enabled plugin tools for a tool-capable model, with a loop guard of 10 tool passes per turn and a stop when the same call repeats 3 times, and a Controlling banner with a Stop button while a browser or computer turn runs.
-- Browser plugin opens tabs and computer plugin opens apps, types, and presses Enter, with a confirmation policy for risky actions, and an Authorization section for computer access, allowed apps, and allowed tools.
-- Transcript step 1: named steps instead of tool names, a Worked for Xs timer, raw tool details hidden behind a per-step Details toggle, and a one-sentence final answer with a link when the model follows the wording.
-
-## What does not work yet
-
-- No live window thumbnail in chat. That is step 2, it needs Mac screen capture and Screen Recording permission, and it is not built.
-- No screenshot or element grounding for clicks. Click still needs coordinates the user gave, or coordinates from an element list, and the tool descriptions forbid guessing.
-- A registered WebMCP tool executing in chat has not been shown end to end yet. The local demo registers local_echo and local_time, and that call is still the next proof to run on a Mac.
-- No CLI plugin group, no model runner in a Go-only build, and the plugin frontmatter parser is flat keys only.
-
-## Security defaults, stated plainly
-
-- Plugins are disabled until you enable them, and a disabled plugin exposes no tools.
-- The Chrome extension forwards tools only from sites you allow in the popup. It does not forward cookies, passwords, or page content.
-- Computer actions are dry-run by default. Real Mac control needs the seed started with OLLAMA_COMPUTER_USE_REAL=1 plus Accessibility permission. Risky actions return confirmation_required and do not run until you confirm.
-- Page data from WebMCP is never an instruction. It cannot add a plugin, a destination, or a permission.
+- Full guide: [docs/PLUGINS-AND-MCP.md](docs/PLUGINS-AND-MCP.md)
+- Set it up with Codex: [docs/SETUP-WITH-CODEX.md](docs/SETUP-WITH-CODEX.md)
 
 ---
 

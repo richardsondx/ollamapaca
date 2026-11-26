@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE } from "@/lib/config";
+import { McpServers } from "./McpServers";
 import {
   ChevronRightIcon,
   MagnifyingGlassIcon,
@@ -19,7 +20,7 @@ type Plugin = {
   enabled: boolean;
 };
 
-type Tab = "plugins" | "skills" | "installed";
+type Tab = "plugins" | "skills" | "installed" | "mcp";
 
 export function PluginIcon({ name, size = 32 }: { name: string; size?: number }) {
   const common = { width: size, height: size, viewBox: "0 0 48 48" } as const;
@@ -65,7 +66,7 @@ export function PluginIcon({ name, size = 32 }: { name: string; size?: number })
 }
 
 function examplesFor(name: string): string[] {
-  if (name === "browser") return ["Browser: create a tab for https://google.com", "Browser: list the tools on the page I allowed"];
+  if (name === "browser") return ["@browser open news.ycombinator.com and tell me the top story", "@browser search wikipedia for alpacas and summarize the intro"];
   if (name === "computer") return ["Computer: open Chrome", "Computer: list the apps I can control"];
   if (name === "skill-creator") return ["Skill: validate a new skill folder before I share it", "Skill: check a SKILL.md frontmatter name matches its folder"];
   return ["Use " + name + " from Ollama, locally only"];
@@ -96,11 +97,11 @@ type Authorization = {
   localhost_auto_allowed: boolean;
 };
 
-// The seed authorization endpoint lives on 11435, not on the fork
-// server on 11434, so it is fetched directly here. If the seed is
-// not running, this section shows a plain note and nothing else
-// on the page breaks.
-const SEED_BASE = "http://127.0.0.1:11435";
+// Authorization lives on the local plugin executor (the seed server
+// on 11435). The desktop app proxies it, so the page talks to one
+// origin and needs no CORS. If the executor is not running, this
+// section shows a plain note and nothing else on the page breaks.
+const SEED_BASE = `${API_BASE}/api/v1/executor`;
 
 async function fetchAuthorization(): Promise<Authorization> {
   const response = await fetch(`${SEED_BASE}/api/authorization`);
@@ -356,6 +357,9 @@ export default function Plugins() {
             >
               Installed
             </button>
+            <button className={tabClass("mcp")} onClick={() => setTab("mcp")}>
+              MCP
+            </button>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
@@ -415,22 +419,22 @@ export default function Plugins() {
       <section className="min-w-0 flex-1 overflow-y-auto px-8 py-6">
         {error && (
           <p className="mb-4 rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
-            {error} The plugin server needs a plugin folder. Set
-            OLLAMA_PLUGINS_DIR, restart Ollama, and open this page again.
+            {error}
           </p>
         )}
-        {!selected && !loading && (
+        {tab === "mcp" && <McpServers />}
+        {tab !== "mcp" && !selected && !loading && (
           <div>
             <h3 className="text-lg font-medium">No plugins yet</h3>
             <p className="mt-2 max-w-xl text-sm leading-6 text-neutral-600 dark:text-neutral-300">
-              Add a plugin folder with a plugin.json manifest and a SKILL.md
-              file, point OLLAMA_PLUGINS_DIR at its parent folder, and restart
-              Ollama. This page lists what the server finds, it does not
-              install plugins from the web.
+              Add a plugin folder to ~/.ollamapaca/plugins: a plugin.json
+              manifest with a SKILL.md, or a Codex or Claude plugin with a
+              .mcp.json. It shows up here without a restart. Or add an MCP
+              server on the MCP tab.
             </p>
           </div>
         )}
-        {selected && (
+        {tab !== "mcp" && selected && (
           <div className="max-w-3xl">
             <p className="text-sm text-neutral-500">
               Plugins &gt; {selected.name}
@@ -471,9 +475,8 @@ export default function Plugins() {
             <div className="mt-6 rounded-2xl bg-neutral-100 px-5 py-4 dark:bg-neutral-800">
               <p className="text-sm font-medium">Try it in chat</p>
               <p className="mt-1 text-sm leading-6 text-neutral-600 dark:text-neutral-300">
-                Enabling a plugin lists its tools at /api/tools, and chat now
-                calls those tools for a tool-capable model. Type @ in chat to
-                pick one enabled plugin for that turn.
+                Enabled plugins give their tools to tool-capable models in
+                chat. Type @ in chat to pick one plugin for that turn.
               </p>
             </div>
 

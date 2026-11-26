@@ -28,9 +28,9 @@ func AppDatabasePath() string {
 	localAppData := os.Getenv("LOCALAPPDATA")
 	switch {
 	case runtime.GOOS == "darwin" && home != "":
-		return filepath.Join(home, "Library", "Application Support", "Ollama", "db.sqlite")
+		return filepath.Join(home, "Library", "Application Support", "Ollamapaca", "db.sqlite")
 	case runtime.GOOS == "windows" && localAppData != "":
-		return filepath.Join(localAppData, "Ollama", "db.sqlite")
+		return filepath.Join(localAppData, "Ollamapaca", "db.sqlite")
 	default:
 		return ""
 	}

@@ -6,12 +6,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -48,7 +53,7 @@ const (
 	// result, so a 10 second cap in chat would cut a real Chrome
 	// execution short. Browser tools get 30 seconds, other plugin
 	// tools keep the 10 second cap.
-	pluginBrowserExecuteTimeout = 30 * time.Second
+	pluginBrowserExecuteTimeout = 60 * time.Second
 )
 
 // pluginTimeoutFor returns the execution timeout for one plugin.
@@ -186,26 +191,36 @@ func (p *PluginTool) Execute(ctx context.Context, args map[string]any) (any, str
 		return nil, "", fmt.Errorf("plugin tool %s: cannot encode arguments: %w", p.Name(), err)
 	}
 	endpoint := fmt.Sprintf("%s/api/tools/%s/%s/execute", p.executorURL, url.PathEscape(p.Plugin), url.PathEscape(p.Tool))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, "", fmt.Errorf("plugin tool %s: cannot build request: %w", p.Name(), err)
-	}
-	req.Header.Set("Content-Type", "application/json")
 	client := p.client
 	if client == nil {
 		client = &http.Client{Timeout: pluginTimeoutFor(p.Plugin)}
 	}
-	resp, err := client.Do(req)
+	status, raw, err := p.post(ctx, client, endpoint, body)
+	if err != nil && isConnRefused(err) {
+		// The executor is not running. Start it if we know where it
+		// lives, then try once more.
+		if startErr := EnsureExecutor(ctx, p.executorURL); startErr == nil {
+			status, raw, err = p.post(ctx, client, endpoint, body)
+		} else {
+			return nil, "", fmt.Errorf("plugin tool %s: the plugin executor is not running at %s (%v). Start it with: python3 scripts/run_server.py in the ollama-plugin-seed folder", p.Name(), p.executorURL, startErr)
+		}
+	}
 	if err != nil {
 		return nil, "", fmt.Errorf("plugin tool %s: executor request failed: %w", p.Name(), err)
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, "", fmt.Errorf("plugin tool %s: cannot read executor reply: %w", p.Name(), err)
+	if status == http.StatusForbidden && strings.Contains(string(raw), "not enabled") {
+		// The desktop app is the source of truth for enable state,
+		// and it only registers tools of enabled plugins. Bring the
+		// executor's own state in step, then retry once.
+		if SyncExecutorPlugin(ctx, p.executorURL, p.Plugin, true) == nil {
+			status, raw, err = p.post(ctx, client, endpoint, body)
+			if err != nil {
+				return nil, "", fmt.Errorf("plugin tool %s: executor request failed: %w", p.Name(), err)
+			}
+		}
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("plugin tool %s: executor returned status %d: %s", p.Name(), resp.StatusCode, strings.TrimSpace(string(raw)))
+	if status != http.StatusOK {
+		return nil, "", fmt.Errorf("plugin tool %s: executor returned status %d: %s", p.Name(), status, strings.TrimSpace(string(raw)))
 	}
 	var reply map[string]any
 	if err := json.Unmarshal(raw, &reply); err != nil {
@@ -223,11 +238,173 @@ func (p *PluginTool) Execute(ctx context.Context, args map[string]any) (any, str
 		}
 		return nil, "", fmt.Errorf("plugin tool %s: executor reply did not confirm success: %s", p.Name(), strings.TrimSpace(string(raw)))
 	}
+	// A result that carries readable text (a page snapshot, page
+	// text) is given to the model as plain text, which small models
+	// read far better than escaped JSON.
+	if res, ok := reply["result"].(map[string]any); ok {
+		if text, ok := res["text"].(string); ok && text != "" {
+			if note, ok := reply["note"].(string); ok && note != "" && !strings.HasPrefix(note, "Real ") {
+				text += "\n\n" + note
+			}
+			return reply, text, nil
+		}
+	}
 	content, err := json.Marshal(reply)
 	if err != nil {
 		return nil, "", fmt.Errorf("plugin tool %s: cannot encode reply: %w", p.Name(), err)
 	}
 	return reply, string(content), nil
+}
+
+func (p *PluginTool) post(ctx context.Context, client *http.Client, endpoint string, body []byte) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return 0, nil, fmt.Errorf("cannot read executor reply: %w", err)
+	}
+	return resp.StatusCode, raw, nil
+}
+
+func isConnRefused(err error) bool {
+	return err != nil && (errors.Is(err, syscall.ECONNREFUSED) || strings.Contains(err.Error(), "connection refused"))
+}
+
+// SyncExecutorPlugin enables or disables a plugin on the executor.
+func SyncExecutorPlugin(ctx context.Context, executorURL, plugin string, enabled bool) error {
+	if err := validateLocalURL(executorURL); err != nil {
+		return err
+	}
+	action := "disable"
+	if enabled {
+		action = "enable"
+	}
+	endpoint := fmt.Sprintf("%s/api/plugins/%s/%s", strings.TrimRight(executorURL, "/"), url.PathEscape(plugin), action)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader("{}"))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("executor %s %s: status %d", action, plugin, resp.StatusCode)
+	}
+	return nil
+}
+
+var (
+	executorMu   sync.Mutex
+	executorProc *exec.Cmd
+)
+
+// executorDirs are the places the plugin executor (the seed server)
+// may live. OLLAMAPACA_SEED_DIR wins.
+func executorDirs() []string {
+	var dirs []string
+	if v := os.Getenv("OLLAMAPACA_SEED_DIR"); v != "" {
+		dirs = append(dirs, v)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, ".ollamapaca", "seed"), filepath.Join(home, ".ollamapaca", "ollama-plugin-seed"))
+	}
+	var starts []string
+	if exe, err := os.Executable(); err == nil {
+		starts = append(starts, filepath.Dir(exe))
+		dirs = append(dirs, filepath.Join(filepath.Dir(exe), "..", "Resources", "seed"))
+	}
+	if wd, err := os.Getwd(); err == nil {
+		starts = append(starts, wd)
+	}
+	// A checkout of the seed next to the fork checkout.
+	for _, start := range starts {
+		dir := start
+		for i := 0; i < 6; i++ {
+			dirs = append(dirs, filepath.Join(dir, "ollama-plugin-seed"))
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return dirs
+}
+
+// EnsureExecutor starts the local plugin executor when it is not
+// running and its folder can be found. It waits up to 8 seconds for
+// it to answer.
+func EnsureExecutor(ctx context.Context, executorURL string) error {
+	executorMu.Lock()
+	defer executorMu.Unlock()
+	ping := func() bool {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(executorURL, "/")+"/api/plugins", nil)
+		resp, err := (&http.Client{Timeout: time.Second}).Do(req)
+		if err != nil {
+			return false
+		}
+		resp.Body.Close()
+		return true
+	}
+	if ping() {
+		return nil
+	}
+	u, _ := url.Parse(executorURL)
+	if executorProc == nil || executorProc.ProcessState != nil {
+		dir := ""
+		for _, d := range executorDirs() {
+			if _, err := os.Stat(filepath.Join(d, "scripts", "run_server.py")); err == nil {
+				dir = d
+				break
+			}
+		}
+		if dir == "" {
+			return errors.New("plugin executor folder not found (set OLLAMAPACA_SEED_DIR or put ollama-plugin-seed in ~/.ollamapaca/seed)")
+		}
+		python := resolveCommand("python3", mcpEnv(nil))
+		cmd := exec.Command(python, filepath.Join(dir, "scripts", "run_server.py"))
+		cmd.Dir = dir
+		cmd.Env = mcpEnv(map[string]string{"OLLAMA_PLUGIN_PORT": u.Port()})
+		hideWindow(cmd)
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("cannot start plugin executor: %w", err)
+		}
+		executorProc = cmd
+		go cmd.Wait()
+	}
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if ping() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return errors.New("plugin executor did not start")
+}
+
+// StopExecutor stops an executor this process started.
+func StopExecutor() {
+	executorMu.Lock()
+	defer executorMu.Unlock()
+	if executorProc != nil && executorProc.Process != nil && executorProc.ProcessState == nil {
+		_ = executorProc.Process.Kill()
+	}
+	executorProc = nil
 }
 
 // MentionedPlugins returns the enabled plugins named with @ in a
@@ -297,7 +474,7 @@ func mentionTokens(prompt string) []string {
 		j := i + 1
 		for j < len(runes) {
 			r := runes[j]
-			if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' {
+			if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
 				j++
 			} else {
 				break

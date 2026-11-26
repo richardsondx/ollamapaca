@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,10 +17,12 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ollama/ollama/app/logrotate"
 	"github.com/ollama/ollama/app/store"
+	"github.com/ollama/ollama/envconfig"
 )
 
 const restartDelay = time.Second
@@ -188,12 +191,32 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	reaped := false
+	usingExternal := false
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(restartDelay):
 		}
+
+		// Ollamapaca can run next to an installed Ollama app. When an
+		// Ollama server already answers on the configured host, use it
+		// instead of starting a second one, and never stop it. Check
+		// again every few seconds, and start our own server only if
+		// that one goes away.
+		if externalServerRunning(ctx) {
+			if !usingExternal {
+				slog.Info("using the Ollama server that is already running", "host", envconfig.ConnectableHost().String())
+				usingExternal = true
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
+			continue
+		}
+		usingExternal = false
 
 		cmd, err := s.cmd(ctx)
 		if err != nil {
@@ -211,6 +234,10 @@ func (s *Server) Run(ctx context.Context) error {
 
 		if err = cmd.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && externalServerRunning(ctx) {
+				// Another app's server took the port. Use it, do not stop it.
+				continue
+			}
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && !s.dev && !reaped {
 				reaped = true
 				// This could be a port conflict, try to kill any existing ollama processes
@@ -406,4 +433,38 @@ func GetInferenceInfo(ctx context.Context) (*InferenceInfo, error) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// externalServerRunning reports whether an Ollama server that this app
+// did not start already answers on the configured host.
+func externalServerRunning(ctx context.Context) bool {
+	if pid, err := os.ReadFile(pidFile); err == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(string(pid))); err == nil && processAlive(n) {
+			// Our own server from a previous run: cleanup handles it.
+			return false
+		}
+	}
+	cctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, envconfig.ConnectableHost().String()+"/api/version", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+func processAlive(pid int) bool {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return p.Signal(syscall.Signal(0)) == nil
 }
