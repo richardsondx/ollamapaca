@@ -109,3 +109,32 @@ func TestServeUIForManualCheck(t *testing.T) {
 	defer s.Shutdown()
 	t.Fatal(http.ListenAndServe(addr, s.Handler()))
 }
+
+// TestLivePresets enables every bundled plugin in a temp home and
+// prints what each MCP server does without credentials. Opt in.
+func TestLivePresets(t *testing.T) {
+	if os.Getenv("OLLAMAPACA_LIVE_PRESETS") == "" {
+		t.Skip("set OLLAMAPACA_LIVE_PRESETS=1 to run")
+	}
+	t.Setenv("OLLAMAPACA_HOME", t.TempDir())
+	svc := newPluginService(nil)
+	defer svc.mcp.Close()
+	for _, p := range svc.reg.List() {
+		if len(p.MCPServers) > 0 {
+			svc.reg.Enable(p.Name)
+		}
+	}
+	svc.syncMCP()
+	svc.warmUp()
+	for _, st := range svc.mcp.Status() {
+		names := []string{}
+		for _, tl := range st.Tools {
+			names = append(names, tl.Name)
+		}
+		errText := st.Error
+		if len(errText) > 160 {
+			errText = errText[:160]
+		}
+		t.Logf("%-28s %-12s tools=%d %v %s", st.Key, st.State, len(st.Tools), names, errText)
+	}
+}

@@ -97,6 +97,9 @@ type MCPServerSpec struct {
 	Name   string
 	Plugin string // empty for user servers
 	Config MCPServerConfig
+	// SetupError, when set, says which plugin settings are missing.
+	// The server is not started until they are filled in.
+	SetupError string
 }
 
 // MCPServerStatus is what the Plugins page shows for a server.
@@ -106,10 +109,12 @@ type MCPServerStatus struct {
 	Plugin    string          `json:"plugin,omitempty"`
 	Config    MCPServerConfig `json:"config"`
 	Transport string          `json:"transport"`
-	State     string          `json:"state"` // idle, starting, ready, error, disabled
+	State     string          `json:"state"` // idle, starting, ready, error, disabled, needs_auth, needs_setup
 	Error     string          `json:"error,omitempty"`
 	Tools     []MCPTool       `json:"tools"`
 	Server    map[string]any  `json:"serverInfo,omitempty"`
+	// SignedIn is true when an OAuth token is stored for the server.
+	SignedIn bool `json:"signedIn,omitempty"`
 }
 
 type mcpServerState struct {
@@ -151,7 +156,7 @@ func (m *MCPManager) Sync(specs []MCPServerSpec) {
 	m.mu.Lock()
 	for key, st := range m.servers {
 		spec, ok := want[key]
-		if !ok || !reflect.DeepEqual(spec.Config, st.spec.Config) {
+		if !ok || !reflect.DeepEqual(spec.Config, st.spec.Config) || spec.SetupError != st.spec.SetupError {
 			if st.client != nil {
 				toClose = append(toClose, st.client)
 			}
@@ -163,6 +168,8 @@ func (m *MCPManager) Sync(specs []MCPServerSpec) {
 			state := "idle"
 			if spec.Config.Disabled {
 				state = "disabled"
+			} else if spec.SetupError != "" {
+				state = "needs_setup"
 			}
 			m.servers[key] = &mcpServerState{spec: spec, state: state}
 		}
@@ -186,6 +193,11 @@ func (m *MCPManager) connect(ctx context.Context, st *mcpServerState) (*MCPClien
 	defer st.mu.Unlock()
 	if st.spec.Config.Disabled {
 		return nil, fmt.Errorf("MCP server %q is disabled", st.spec.Name)
+	}
+	if st.spec.SetupError != "" {
+		st.state = "needs_setup"
+		st.err = st.spec.SetupError
+		return nil, errors.New(st.spec.SetupError)
 	}
 	if st.client != nil && st.client.Alive() {
 		return st.client, nil
@@ -215,6 +227,10 @@ func (m *MCPManager) connect(ctx context.Context, st *mcpServerState) (*MCPClien
 	}
 	st.state = "error"
 	st.err = err.Error()
+	if errors.Is(err, ErrNeedsSignIn) {
+		st.state = "needs_auth"
+		st.err = "Sign in to use this server: click Connect."
+	}
 	st.lastFail = time.Now()
 	m.logger.Warn("MCP server failed", "server", st.spec.Key, "error", err)
 	return nil, err
@@ -302,6 +318,12 @@ func (m *MCPManager) Status() []MCPServerStatus {
 		if st.client != nil {
 			s.Server = st.client.ServerInfo
 		}
+		if s.Transport != "stdio" {
+			s.SignedIn = MCPSignedIn(st.spec.Config.URL)
+		}
+		if st.spec.SetupError != "" {
+			s.Error = st.spec.SetupError
+		}
 		st.mu.Unlock()
 		out = append(out, s)
 	}
@@ -326,6 +348,57 @@ func redactConfig(c MCPServerConfig) MCPServerConfig {
 		c.Headers = h
 	}
 	return c
+}
+
+// SignIn starts a browser OAuth sign-in for an HTTP server. It
+// returns the URL to open; when the sign-in finishes the server is
+// reconnected in the background.
+func (m *MCPManager) SignIn(ctx context.Context, key string) (string, error) {
+	st, ok := m.get(key)
+	if !ok {
+		return "", fmt.Errorf("unknown MCP server %q", key)
+	}
+	if st.spec.Config.Transport() == "stdio" {
+		return "", errors.New("sign-in is only for remote MCP servers")
+	}
+	login, err := StartMCPOAuthLogin(ctx, st.spec.Config.URL, st.spec.Config.OAuth)
+	if err != nil {
+		return "", err
+	}
+	go func() {
+		wctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if err := login.Wait(wctx); err != nil {
+			st.mu.Lock()
+			st.state = "needs_auth"
+			st.err = err.Error()
+			st.mu.Unlock()
+			return
+		}
+		_, _ = m.Restart(context.Background(), key)
+	}()
+	return login.AuthURL, nil
+}
+
+// SignOut forgets the stored token and disconnects the server.
+func (m *MCPManager) SignOut(key string) error {
+	st, ok := m.get(key)
+	if !ok {
+		return fmt.Errorf("unknown MCP server %q", key)
+	}
+	if err := MCPSignOut(st.spec.Config.URL); err != nil {
+		return err
+	}
+	st.mu.Lock()
+	if st.client != nil {
+		st.client.Close()
+		st.client = nil
+	}
+	st.tools = nil
+	st.state = "needs_auth"
+	st.err = ""
+	st.mu.Unlock()
+	return nil
 }
 
 // Close stops every server.

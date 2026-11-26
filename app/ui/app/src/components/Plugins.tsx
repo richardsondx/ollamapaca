@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE } from "@/lib/config";
 import { McpServers } from "./McpServers";
+import { PluginSetup, pluginStatusLabel, type SetupPlugin } from "./PluginSetup";
 import {
   ChevronRightIcon,
   MagnifyingGlassIcon,
@@ -11,13 +12,29 @@ type PluginTool = {
   description: string;
 };
 
-type Plugin = {
+type Plugin = SetupPlugin & {
   name: string;
   description: string;
   version: string;
   tools: PluginTool[];
   skills: string[];
   enabled: boolean;
+};
+
+// Monogram icons for bundled plugins without a drawn icon. Plain
+// letters and colours, not the services' logos.
+const MONOGRAMS: Record<string, [string, string]> = {
+  firecrawl: ["F", "#f97316"],
+  "google-calendar": ["31", "#4285f4"],
+  vercel: ["▲", "#111111"],
+  expedia: ["E", "#1e3a8a"],
+  "google-drive": ["D", "#0f9d58"],
+  github: ["GH", "#24292f"],
+  gmail: ["M", "#ea4335"],
+  exa: ["X", "#1d4ed8"],
+  evidence: ["E8", "#0f766e"],
+  dispatch: ["D", "#7c3aed"],
+  cred: ["$", "#b91c1c"],
 };
 
 type Tab = "plugins" | "skills" | "installed" | "mcp";
@@ -57,6 +74,17 @@ export function PluginIcon({ name, size = 32 }: { name: string; size?: number })
       </svg>
     );
   }
+  const mono = MONOGRAMS[name];
+  if (mono) {
+    return (
+      <svg {...common}>
+        <rect x="2" y="2" width="44" height="44" rx="11" fill={mono[1]} />
+        <text x="24" y="24" textAnchor="middle" dominantBaseline="central" fill="#fff" fontFamily="system-ui, sans-serif" fontWeight="700" fontSize={mono[0].length > 1 ? 17 : 22}>
+          {mono[0]}
+        </text>
+      </svg>
+    );
+  }
   return (
     <svg {...common}>
       <rect x="4" y="4" width="40" height="40" rx="8" fill="#e9d5ff" />
@@ -68,6 +96,17 @@ export function PluginIcon({ name, size = 32 }: { name: string; size?: number })
 function examplesFor(name: string): string[] {
   if (name === "browser") return ["@browser open news.ycombinator.com and tell me the top story", "@browser search wikipedia for alpacas and summarize the intro"];
   if (name === "computer") return ["Computer: open Chrome", "Computer: list the apps I can control"];
+  if (name === "firecrawl") return ["@firecrawl scrape news.ycombinator.com and list the top 5 stories"];
+  if (name === "exa") return ["@exa find three recent articles about local LLMs"];
+  if (name === "cred") return ["@cred how has Canada's CPI changed year over year since 2020?"];
+  if (name === "github") return ["@github list my open pull requests"];
+  if (name === "gmail") return ["@gmail summarize my unread email from today"];
+  if (name === "google-calendar") return ["@google-calendar what is on my calendar tomorrow?"];
+  if (name === "google-drive") return ["@google-drive find my most recent budget spreadsheet"];
+  if (name === "vercel") return ["@vercel show the latest deployment of my projects"];
+  if (name === "expedia") return ["@expedia recommend hotels in Lisbon for next weekend"];
+  if (name === "evidence") return ["@evidence find a chart of US 10-year Treasury yields"];
+  if (name === "dispatch") return ["@dispatch list my publications and their subscriber counts"];
   if (name === "skill-creator") return ["Skill: validate a new skill folder before I share it", "Skill: check a SKILL.md frontmatter name matches its folder"];
   return ["Use " + name + " from Ollama, locally only"];
 }
@@ -168,8 +207,8 @@ export default function Plugins() {
   const [authResult, setAuthResult] = useState<string | null>(null);
   const [newApp, setNewApp] = useState("");
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const list = await fetchPlugins();
@@ -396,8 +435,7 @@ export default function Plugins() {
                   {plugin.name}
                 </span>
                 <span className="block truncate text-xs text-neutral-500">
-                  {plugin.enabled ? "Enabled" : "Not enabled"} ·{" "}
-                  {plugin.tools.length} tools
+                  {pluginStatusLabel(plugin)}
                 </span>
               </span>
             </button>
@@ -463,6 +501,8 @@ export default function Plugins() {
                 {selected.enabled ? "Disable" : "Enable"}
               </button>
             </div>
+
+            <PluginSetup plugin={selected} onChange={() => void load(true)} />
 
             <div className="mt-6 flex flex-col items-center gap-2 rounded-2xl bg-gradient-to-r from-blue-100 via-purple-100 to-pink-100 px-5 py-6 dark:from-neutral-800 dark:via-neutral-800 dark:to-neutral-800">
               {examplesFor(selected.name).map((example) => (

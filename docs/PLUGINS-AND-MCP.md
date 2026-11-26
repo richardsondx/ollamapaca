@@ -42,6 +42,12 @@ Servers are saved in `~/.ollamapaca/mcp.json`, start on first use, are warmed up
 
 The app finds `npx`, `uvx`, `docker` and other commands through your login shell's PATH, so servers that work in your terminal work here too.
 
+## Plugin settings and sign-in
+
+A plugin can declare `settings` (API keys, OAuth client IDs) that the Plugins page shows as a form. Its MCP server references them as `${NAME}` in the URL, headers, command, args, env and `oauth` block. A header or URL query parameter whose value is left empty is dropped, so optional keys can stay blank. A required setting that is empty shows "needs setup" instead of a failing server.
+
+Remote MCP servers can sign in with OAuth, as in the MCP authorization spec: Ollamapaca reads the server's protected resource metadata, registers itself with the authorization server when it allows that, and signs in in your browser with PKCE. Tokens are refreshed automatically. Servers that don't allow self-registration (Google) need your own OAuth client ID in the plugin's settings. This works for MCP servers added on the MCP tab too.
+
 ## Plugins
 
 A plugin is a folder in `~/.ollamapaca/plugins` (yours, listed first), `OLLAMA_PLUGINS_DIR`, or the folders bundled with the app. Three layouts are understood:

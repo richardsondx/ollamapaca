@@ -17,6 +17,20 @@ Ollamapaca 是带插件的 Ollama。本地开源模型可以控制你真实的 C
 - **Codex 和 Claude 插件。** 支持包含 `.codex-plugin/plugin.json` 或 `.claude-plugin/plugin.json` 的插件文件夹，以及其中自带的 `.mcp.json` 服务器和技能。
 - **`@` 提及。** 在聊天中输入 `@browser` 或 `@<MCP 服务器名>`，这条消息就只给模型这些工具。
 
+## 内置插件
+
+以下插件随应用一起提供，在 Plugins 页面启用之前**都是关闭的**。需要密钥或登录的插件会显示设置表单和 **Connect** 按钮。
+
+- 无需任何设置：`cred`（加拿大经济数据）、`exa`（网页和代码搜索）、`firecrawl`（抓取和搜索网页）
+- 点击 Connect 登录：`vercel`、`evidence`（也可用 API 密钥）
+- 需要密钥：`github`（个人访问令牌）、`dispatch`、`expedia`（还需安装 uv）
+- 需要你自己的 Google OAuth 客户端，然后点击 Connect：`gmail`、`google-calendar`、`google-drive`
+- 以及 `browser` 和 `computer`
+
+你输入的密钥只保存在你的 Mac 上（`~/.ollamapaca/plugin-settings.json`），登录令牌保存在 `~/.ollamapaca/oauth.json`，两个文件只有你能读取。
+
+先试一个无需设置的：启用 **cred**，然后问 `@cred 自 2023 年以来加拿大 CPI 的同比变化如何？`
+
 ## 快速开始（Mac）
 
 1. **构建并打开应用**（需要 Go 1.26 和 Node 22）：

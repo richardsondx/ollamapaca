@@ -1,0 +1,29 @@
+{
+  "name": "expedia",
+  "description": "Hotel, flight, activity and car rental recommendations from Expedia.",
+  "version": "0.1.0",
+  "homepage": "https://github.com/ExpediaGroup/expedia-travel-recommendations-mcp",
+  "settings": [
+    {
+      "name": "EXPEDIA_API_KEY",
+      "label": "Expedia API key",
+      "required": true,
+      "secret": true,
+      "url": "https://github.com/ExpediaGroup/expedia-travel-recommendations-mcp",
+      "help": "Needs uv (uvx) installed, and an Expedia API key."
+    }
+  ],
+  "mcpServers": {
+    "expedia": {
+      "command": "uvx",
+      "args": [
+        "expedia_travel_recommendations_mcp",
+        "--protocol",
+        "stdio"
+      ],
+      "env": {
+        "EXPEDIA_API_KEY": "${EXPEDIA_API_KEY}"
+      }
+    }
+  }
+}

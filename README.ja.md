@@ -17,6 +17,20 @@ Ollamapaca はプラグイン付きの Ollama です。ローカルのオープ�
 - **Codex と Claude のプラグイン。** `.codex-plugin/plugin.json` や `.claude-plugin/plugin.json` を含むフォルダを、同梱の `.mcp.json` サーバーやスキルごと読み込みます。
 - **`@` メンション。** チャットで `@browser` や `@<MCP サーバー名>` と入力すると、そのメッセージではモデルにそのツールだけを渡します。
 
+## 同梱プラグイン
+
+以下はすべてアプリに同梱されており、Plugins ページで有効にするまで**オフ**です。キーやサインインが必要なプラグインには設定フォームと **Connect** ボタンが表示されます。
+
+- 設定不要：`cred`（カナダの経済データ）、`exa`（Web・コード検索）、`firecrawl`（Web の取得と検索）
+- Connect でサインイン：`vercel`、`evidence`（API キーでも可）
+- キーが必要：`github`（個人用アクセストークン）、`dispatch`、`expedia`（uv も必要）
+- 自分の Google OAuth クライアントを設定してから Connect：`gmail`、`google-calendar`、`google-drive`
+- そして `browser` と `computer`
+
+入力したキーはあなたの Mac の `~/.ollamapaca/plugin-settings.json` にだけ保存され、サインインのトークンは `~/.ollamapaca/oauth.json` に保存されます。どちらもあなただけが読めます。
+
+まずは設定不要のものを試してください：**cred** を有効にして `@cred 2023年以降のカナダの CPI の前年比の推移は？` と聞いてみましょう。
+
 ## クイックスタート（Mac）
 
 1. **アプリをビルドして起動します**（Go 1.26 と Node 22 が必要）：

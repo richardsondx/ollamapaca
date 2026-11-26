@@ -1,0 +1,24 @@
+{
+  "name": "evidence",
+  "description": "Verified charts, tables and figures for financial research, with sources.",
+  "version": "0.1.0",
+  "homepage": "https://evidence8.com",
+  "settings": [
+    {
+      "name": "EVIDENCE_API_KEY",
+      "label": "Evidence API key",
+      "secret": true,
+      "url": "https://evidence8.com",
+      "help": "Optional. Without a key, click Connect to sign in instead. Each search with results uses one prepaid credit."
+    }
+  ],
+  "mcpServers": {
+    "evidence": {
+      "type": "http",
+      "url": "https://evidence8.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${EVIDENCE_API_KEY}"
+      }
+    }
+  }
+}

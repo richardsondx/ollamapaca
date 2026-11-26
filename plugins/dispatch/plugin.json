@@ -1,0 +1,25 @@
+{
+  "name": "dispatch",
+  "description": "Newsletters for agents: publications, subscribers, issues and sends.",
+  "version": "0.1.0",
+  "homepage": "https://dispatch.nshipyard.com",
+  "settings": [
+    {
+      "name": "DISPATCH_API_KEY",
+      "label": "Dispatch API key",
+      "required": true,
+      "secret": true,
+      "url": "https://dispatch.nshipyard.com",
+      "help": "Run `dispatch agent connect` and have the publication owner approve the code, or use your master key."
+    }
+  ],
+  "mcpServers": {
+    "dispatch": {
+      "type": "http",
+      "url": "https://dispatch.nshipyard.com/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DISPATCH_API_KEY}"
+      }
+    }
+  }
+}

@@ -17,6 +17,20 @@ Dépôt compagnon : [ollama-plugin-seed](https://github.com/richardsondx/ollama-
 - **Les plugins Codex et Claude.** Les dossiers contenant `.codex-plugin/plugin.json` ou `.claude-plugin/plugin.json` se chargent, avec leurs serveurs `.mcp.json` et leurs skills.
 - **Les mentions `@`.** Tapez `@browser` ou `@<serveur-mcp>` dans le chat pour ne donner que ces outils au modèle pour un message.
 
+## Plugins inclus
+
+Ils sont tous fournis avec l'application et restent **désactivés tant que vous ne les activez pas** sur la page Plugins. Ceux qui demandent une clé ou une connexion affichent un formulaire et un bouton **Connect**.
+
+- Aucune configuration : `cred` (données économiques canadiennes), `exa` (recherche web et code), `firecrawl` (extraire et chercher sur le web)
+- Connexion avec Connect : `vercel`, `evidence` (ou avec une clé d'API)
+- Avec une clé : `github` (jeton d'accès personnel), `dispatch`, `expedia` (demande aussi uv)
+- Avec votre propre client OAuth Google, puis Connect : `gmail`, `google-calendar`, `google-drive`
+- Ainsi que `browser` et `computer`
+
+Les clés saisies restent sur votre Mac (`~/.ollamapaca/plugin-settings.json`) et les jetons de connexion dans `~/.ollamapaca/oauth.json` ; vous seul pouvez lire ces deux fichiers.
+
+Essayez-en un qui ne demande rien : activez **cred**, puis demandez `@cred comment l'IPC du Canada a-t-il évolué sur un an depuis 2023 ?`
+
 ## Démarrage rapide (Mac)
 
 1. **Compilez et ouvrez l'application**, avec Go 1.26 et Node 22 :

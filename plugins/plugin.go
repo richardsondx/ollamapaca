@@ -36,6 +36,30 @@ type MCPServer struct {
 	Headers        map[string]string `json:"headers,omitempty"`
 	Disabled       bool              `json:"disabled,omitempty"`
 	ToolTimeoutSec int               `json:"tool_timeout_sec,omitempty"`
+	// OAuth turns on MCP OAuth sign-in for an HTTP server. With no
+	// client id, the app registers itself with the authorization
+	// server (dynamic client registration).
+	OAuth *OAuthConfig `json:"oauth,omitempty"`
+}
+
+// OAuthConfig is the OAuth client a plugin's MCP server signs in with.
+// Values may reference plugin settings as ${NAME}.
+type OAuthConfig struct {
+	ClientID     string   `json:"client_id,omitempty"`
+	ClientSecret string   `json:"client_secret,omitempty"`
+	Scopes       []string `json:"scopes,omitempty"`
+}
+
+// Setting is a value the user enters on the Plugins page, such as an
+// API key. MCP server commands, URLs, headers and env reference it as
+// ${NAME}.
+type Setting struct {
+	Name     string `json:"name"`
+	Label    string `json:"label"`
+	Help     string `json:"help,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Secret   bool   `json:"secret,omitempty"`
+	Required bool   `json:"required,omitempty"`
 }
 
 // Plugin is a validated plugin folder.
@@ -55,9 +79,14 @@ type Plugin struct {
 	// Instructions is the SKILL.md body, given to the model as a
 	// system message while the plugin's tools are active.
 	Instructions string `json:"-"`
+	// Settings the user can fill in, and where to learn more.
+	Settings []Setting `json:"settings,omitempty"`
+	Homepage string    `json:"homepage,omitempty"`
 }
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
+
+var settingNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 
 // parseFrontmatter reads the simple key: value frontmatter at the
 // top of a SKILL.md file. It is not a full YAML parser, by design:
@@ -122,6 +151,8 @@ func loadPlugin(dir string) (Plugin, error) {
 		Version     string          `json:"version"`
 		Tools       []Tool          `json:"tools"`
 		MCPServers  json.RawMessage `json:"mcpServers"`
+		Settings    []Setting       `json:"settings"`
+		Homepage    string          `json:"homepage"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return p, fmt.Errorf("invalid plugin.json in %s: %w", dir, err)
@@ -163,6 +194,11 @@ func loadPlugin(dir string) (Plugin, error) {
 	if raw.Tools == nil {
 		raw.Tools = []Tool{}
 	}
+	for _, st := range raw.Settings {
+		if !settingNamePattern.MatchString(st.Name) {
+			return p, fmt.Errorf("plugin %q: invalid setting name %q, use A-Z, 0-9 and _", raw.Name, st.Name)
+		}
+	}
 	abs, _ := filepath.Abs(dir)
 	p = Plugin{
 		Name:         raw.Name,
@@ -174,6 +210,8 @@ func loadPlugin(dir string) (Plugin, error) {
 		Dir:          abs,
 		Format:       format,
 		Instructions: instructions,
+		Settings:     raw.Settings,
+		Homepage:     raw.Homepage,
 	}
 	return p, nil
 }
