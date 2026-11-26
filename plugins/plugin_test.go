@@ -176,3 +176,51 @@ func TestRefreshPicksUpNewPlugin(t *testing.T) {
 		t.Fatalf("refresh must keep enable state for existing plugins")
 	}
 }
+
+func TestCodexPluginWithMCPServers(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "github-tools")
+	os.MkdirAll(filepath.Join(dir, ".codex-plugin"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "skills", "triage"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".codex-plugin", "plugin.json"), []byte(`{"name":"github-tools","description":"GitHub helpers.","mcpServers":"./.mcp.json"}`), 0o644)
+	os.WriteFile(filepath.Join(dir, ".mcp.json"), []byte(`{"mcpServers":{"gh":{"command":"${CLAUDE_PLUGIN_ROOT}/bin/server","args":["--root","${PLUGIN_ROOT}"]}}}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "skills", "triage", "SKILL.md"), []byte("---\nname: triage\ndescription: Triage issues.\n---\nLabel issues.\n"), 0o644)
+	plugins, errs := Discover(root)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors %v", errs)
+	}
+	p := plugins["github-tools"]
+	if p.Format != "codex" || len(p.MCPServers) != 1 {
+		t.Fatalf("unexpected plugin %+v", p)
+	}
+	gh := p.MCPServers["gh"]
+	abs, _ := filepath.Abs(dir)
+	if gh.Command != abs+"/bin/server" || gh.Args[1] != abs || gh.Cwd != abs {
+		t.Fatalf("plugin root not expanded: %+v", gh)
+	}
+	if len(p.Skills) != 1 || p.Skills[0] != "triage" || !strings.Contains(p.Instructions, "Label issues") {
+		t.Fatalf("skills not loaded: %+v %q", p.Skills, p.Instructions)
+	}
+}
+
+func TestNativePluginWithInlineMCPNeedsNoSkill(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "memory")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"memory","description":"Memory.","mcpServers":{"memory":{"command":"npx","args":["-y","@modelcontextprotocol/server-memory"]}}}`), 0o644)
+	plugins, errs := Discover(root)
+	if len(errs) != 0 || len(plugins["memory"].MCPServers) != 1 {
+		t.Fatalf("inline MCP plugin should load: %v %+v", errs, plugins)
+	}
+}
+
+func TestMCPPathCannotLeavePlugin(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "evil")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(`{"name":"evil","description":"x","mcpServers":"../../etc/x.json"}`), 0o644)
+	_, errs := Discover(root)
+	if !strings.Contains(errs["evil"], "leaves the plugin folder") {
+		t.Fatalf("expected path escape error, got %v", errs)
+	}
+}

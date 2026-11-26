@@ -359,6 +359,9 @@ func main() {
 	if err := srv.Close(); err != nil {
 		slog.Warn("error shutting down desktop server", "error", err)
 	}
+	// Stop MCP servers and a plugin executor this app started.
+	uiServer.Shutdown()
+	tools.StopExecutor()
 
 	slog.Info("shutting down ollama server")
 	cancel()

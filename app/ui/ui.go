@@ -290,6 +290,20 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/create-chat", handle(s.createChat))
 	mux.Handle("PUT /api/v1/chat/{id}/rename", handle(s.renameChat))
 
+	// Plugins and MCP servers, owned by the desktop app so they work
+	// with any ollama server on 11434.
+	mux.Handle("GET /api/plugins", handle(s.listPlugins))
+	mux.Handle("POST /api/plugins/refresh", handle(s.refreshPlugins))
+	mux.Handle("GET /api/plugins/skills", handle(s.listPluginSkills))
+	mux.Handle("POST /api/plugins/{name}/{action}", handle(s.pluginAction))
+	mux.Handle("GET /api/tools", handle(s.listPluginTools))
+	mux.Handle("GET /api/v1/mcp", handle(s.listMCP))
+	mux.Handle("POST /api/v1/mcp", handle(s.addMCP))
+	mux.Handle("POST /api/v1/mcp/{name}/{action}", handle(s.mcpAction))
+	mux.Handle("DELETE /api/v1/mcp/{name}", handle(s.deleteMCP))
+	mux.Handle("GET /api/v1/executor/", handle(s.executorProxy))
+	mux.Handle("POST /api/v1/executor/", handle(s.executorProxy))
+
 	mux.Handle("GET /api/v1/inference-compute", handle(s.getInferenceCompute))
 	mux.Handle("POST /api/v1/model/upstream", handle(s.modelUpstream))
 	mux.Handle("GET /api/v1/settings", handle(s.getSettings))
@@ -936,6 +950,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) error {
 	// Note: Skip agent/tools mode if user has attachments, as the agent doesn't handle file attachments properly
 	registry := tools.NewRegistry()
 	var browser *tools.Browser
+	var pluginInstructions []string
 	ctx = tools.WithAllowedDirectURLs(ctx, userMessageText(chat.Messages))
 
 	if !hasAttachments {
@@ -958,57 +973,16 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 
-		// Plugin tools (chat wiring, 2026-11-04): register tools from
-		// enabled plugins alongside the web search tools, independent
-		// of the WebSearch toggle, for tool-capable models only. Best
-		// effort: a fetch failure is logged and chat continues with
-		// no plugin tools, it never breaks chat. If a browser plugin
-		// tool is registered, make sure a browser state object exists,
-		// because the existing tool loop below reads browser state
-		// for any tool name starting with "browser.".
+		// Plugin and MCP tools: registered for tool-capable models,
+		// independent of the web search toggle. Enabled plugins and
+		// enabled MCP servers are used, narrowed by any @ mention.
+		// Best effort: a plugin or server that fails is skipped and
+		// never breaks chat.
 		if hasToolsCapability {
-			pluginTools, err := tools.LoadPluginTools(ctx, tools.PluginToolsURLFromEnv(), tools.PluginExecutorURLFromEnv())
-			if err != nil {
-				s.log().Warn("plugin tools unavailable, continuing chat without plugin tools", "error", err)
-			} else {
-				// @ mention rule: if the prompt contains any @ mention,
-				// only the mentioned enabled plugins are registered
-				// for this turn. A mention of a non-enabled plugin
-				// registers nothing for that plugin, and it never
-				// turns a plugin on. If there is no @ mention, all
-				// enabled plugins are registered, as before.
-				if tools.HasMention(req.Prompt) {
-					enabledNames := []string{}
-					seenNames := map[string]bool{}
-					for _, pluginTool := range pluginTools {
-						if !seenNames[pluginTool.Plugin] {
-							seenNames[pluginTool.Plugin] = true
-							enabledNames = append(enabledNames, pluginTool.Plugin)
-						}
-					}
-					mentioned := tools.MentionedPlugins(req.Prompt, enabledNames)
-					mentionedSet := map[string]bool{}
-					for _, name := range mentioned {
-						mentionedSet[name] = true
-					}
-					filtered := []*tools.PluginTool{}
-					for _, pluginTool := range pluginTools {
-						if mentionedSet[pluginTool.Plugin] {
-							filtered = append(filtered, pluginTool)
-						}
-					}
-					pluginTools = filtered
-				}
-				for _, pluginTool := range pluginTools {
-					registry.Register(pluginTool)
-					if browser == nil && strings.HasPrefix(pluginTool.Name(), "browser.") {
-						browserState, ok := s.browserState(chat)
-						if !ok {
-							browserState = reconstructBrowserState(chat.Messages, tools.DefaultViewTokens)
-						}
-						browser = tools.NewBrowser(browserState)
-					}
-				}
+			turn := s.plugins().registerTurnTools(ctx, registry, req.Prompt)
+			pluginInstructions = turn.instructions
+			if turn.count > 0 {
+				s.log().Info("plugin tools for this turn", "sources", turn.names, "tools", turn.count)
 			}
 		}
 	}
@@ -1044,6 +1018,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	passNum := 1
+	emptyRetries := 0
 
 	for {
 		if passNum > 10 {
@@ -1087,7 +1062,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
+		compactOldBrowserResults(chatReq.Messages)
+		if len(pluginInstructions) > 0 && len(availableTools) > 0 {
+			chatReq.Messages = append([]api.Message{{Role: "system", Content: pluginSystemPrompt(pluginInstructions)}}, chatReq.Messages...)
+		}
 
+		gotOutput := false
 		err = c.Chat(ctx, chatReq, func(res api.ChatResponse) error {
 			if loading {
 				// Remove the loading indicator on first token
@@ -1105,6 +1085,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) error {
 			if res.Message.Content == "" && res.Message.Thinking == "" && len(res.Message.ToolCalls) == 0 {
 				return nil
 			}
+			gotOutput = true
 
 			event := EventChat
 			if thinkingTimeStart != nil && res.Message.Content == "" && len(res.Message.ToolCalls) == 0 {
@@ -1162,35 +1143,30 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) error {
 							return err
 						}
 					} else {
-						onlyStandalone := true
-						for _, tc := range res.Message.ToolCalls {
-							if !(tc.Function.Name == "web_search" || tc.Function.Name == "web_fetch") {
-								onlyStandalone = false
-								break
+						// No assistant message yet for this pass (the
+						// model answered with tool calls only, which is
+						// what most local models do). Persist an
+						// assistant message carrying the calls, so the
+						// next pass sends call and result as a pair.
+						// Without it the model sees tool results that
+						// answer nothing and loses the thread.
+						toolCalls := make([]store.ToolCall, len(res.Message.ToolCalls))
+						for i, tc := range res.Message.ToolCalls {
+							argsJSON, _ := json.Marshal(tc.Function.Arguments)
+							toolCalls[i] = store.ToolCall{
+								Type: "function",
+								Function: store.ToolFunction{
+									Name:      tc.Function.Name,
+									Arguments: string(argsJSON),
+								},
 							}
 						}
-						if onlyStandalone {
-							toolCalls := make([]store.ToolCall, len(res.Message.ToolCalls))
-							for i, tc := range res.Message.ToolCalls {
-								argsJSON, _ := json.Marshal(tc.Function.Arguments)
-								toolCalls[i] = store.ToolCall{
-									Type: "function",
-									Function: store.ToolFunction{
-										Name:      tc.Function.Name,
-										Arguments: string(argsJSON),
-									},
-								}
-							}
-
-							synth := store.NewMessage("assistant", "", &store.MessageOptions{Model: req.Model, ToolCalls: toolCalls})
-							chat.Messages = append(chat.Messages, synth)
-							if err := s.Store.AppendMessage(chat.ID, synth); err != nil {
-								return err
-							}
-
-							// clear buffer to avoid-injecting again
-							pendingAssistantToolCalls = nil
+						synth := store.NewMessage("assistant", "", &store.MessageOptions{Model: req.Model, ToolCalls: toolCalls})
+						chat.Messages = append(chat.Messages, synth)
+						if err := s.Store.AppendMessage(chat.ID, synth); err != nil {
+							return err
 						}
+						pendingAssistantToolCalls = nil
 					}
 				}
 
@@ -1258,7 +1234,15 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) error {
 					}
 
 					var tr json.RawMessage
-					if strings.HasPrefix(toolCall.Function.Name, "browser.search") {
+					if !isBuiltinBrowserTool(toolCall.Function.Name) {
+						// Plugin, MCP and other tools: the result is
+						// stored with the message for the UI.
+						var err error
+						tr, err = json.Marshal(result)
+						if err != nil {
+							return fmt.Errorf("failed to marshal tool result: %w", err)
+						}
+					} else if strings.HasPrefix(toolCall.Function.Name, "browser.search") {
 						// For standalone web_search, ensure the tool message has readable content
 						// so the second-pass model can consume results, while keeping browser state flow intact.
 						// We still persist tool msg with content below.
@@ -1280,21 +1264,8 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) error {
 								return fmt.Errorf("failed to persist browser state to chat: %w", err)
 							}
 						}
-						if strings.HasPrefix(toolCall.Function.Name, "browser.webmcp.") {
-							var err error
-							tr, err = json.Marshal(result)
-							if err != nil {
-								return fmt.Errorf("failed to marshal tool result: %w", err)
-							}
-						}
 						// tool result is not added to the tool message for
-						// the built-in browser tools, only for plugin ones
-					} else {
-						var err error
-						tr, err = json.Marshal(result)
-						if err != nil {
-							return fmt.Errorf("failed to marshal tool result: %w", err)
-						}
+						// the built-in browser tools
 					}
 					// ensure tool message sent back to the model has content (if empty, use a sensible fallback)
 					modelContent := content
@@ -1428,6 +1399,16 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) error {
 			return nil
 		}
 
+		// A tool-enabled pass that produced nothing at all usually
+		// means the model wrote a tool call that Ollama's parser could
+		// not read, which small local models do now and then. Retry
+		// the pass instead of ending the turn with a blank answer.
+		if !gotOutput && len(availableTools) > 0 && emptyRetries < 2 {
+			emptyRetries++
+			s.log().Warn("empty model reply with tools, retrying", "attempt", emptyRetries)
+			continue
+		}
+
 		// Text-JSON fallback: some models write a tool call as
 		// plain assistant text that is exactly one JSON object,
 		// for example {"name": "cua.create_tab", "arguments": {...}},
@@ -1512,15 +1493,10 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) error {
 							flusher.Flush()
 						} else {
 							var tr json.RawMessage
-							if strings.HasPrefix(fullName, "browser") && fullName != "browser.search" {
+							if isBuiltinBrowserTool(fullName) && fullName != "browser.search" {
 								if browser != nil {
 									if stateBytes, err := json.Marshal(browser.State()); err == nil {
 										_ = s.Store.UpdateChatBrowserState(chat.ID, json.RawMessage(stateBytes))
-									}
-								}
-								if strings.HasPrefix(fullName, "browser.webmcp.") {
-									if encoded, err := json.Marshal(result); err == nil {
-										tr = encoded
 									}
 								}
 							} else {
@@ -2116,6 +2092,23 @@ func convertToOllamaTool(toolSchema map[string]any) api.Tool {
 	tool.Function.Parameters.Properties = api.NewToolPropertiesMap()
 
 	if schemaProps, ok := toolSchema["schema"].(map[string]any); ok {
+		// Keep the full JSON schema (enums, array items, nested
+		// objects, multi-type fields) by decoding it into Ollama's
+		// parameter types. MCP tools depend on those details. Fall
+		// back to the simple conversion below if it does not decode.
+		if raw, err := json.Marshal(schemaProps); err == nil {
+			var params api.ToolFunctionParameters
+			if err := json.Unmarshal(raw, &params); err == nil && params.Properties != nil {
+				if params.Type == "" {
+					params.Type = "object"
+				}
+				if params.Required == nil {
+					params.Required = []string{}
+				}
+				tool.Function.Parameters = params
+				return tool
+			}
+		}
 		tool.Function.Parameters.Type = getStringFromMap(schemaProps, "type", "object")
 
 		if props, ok := schemaProps["properties"].(map[string]any); ok {

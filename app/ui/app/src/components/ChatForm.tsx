@@ -114,10 +114,13 @@ function ChatForm({
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionStart, setMentionStart] = useState<number | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
-  const mentionLoadedRef = useRef(false);
+  const mentionLoadedRef = useRef(0);
 
   const fetchMentionPlugins = useCallback(async () => {
-    if (mentionLoadedRef.current) return;
+    // Refresh at most every 10 seconds, so a plugin or MCP server
+    // enabled on the Plugins page shows up without a reload.
+    if (Date.now() - mentionLoadedRef.current < 10000) return;
+    mentionLoadedRef.current = Date.now();
     try {
       const response = await fetch(`${API_BASE}/api/plugins`);
       if (!response.ok) return;
@@ -129,8 +132,28 @@ function ChatForm({
       }>)
         .filter((p) => p.enabled)
         .map((p) => ({ name: p.name, description: p.description }));
+      // MCP servers added on the Plugins page can be mentioned too.
+      try {
+        const mcp = await fetch(`${API_BASE}/api/v1/mcp`);
+        if (mcp.ok) {
+          const mcpData = await mcp.json();
+          for (const server of (mcpData.servers || []) as Array<{
+            name: string;
+            plugin?: string;
+            state: string;
+            tools: unknown[];
+          }>) {
+            if (server.plugin || server.state === "disabled") continue;
+            enabled.push({
+              name: server.name,
+              description: `MCP server · ${server.tools.length} tools`,
+            });
+          }
+        }
+      } catch {
+        // MCP list is optional for the picker.
+      }
       setMentionPlugins(enabled);
-      mentionLoadedRef.current = true;
     } catch {
       // Leave the dropdown empty on a fetch failure, do not break chat.
     }
@@ -150,7 +173,7 @@ function ChatForm({
 
   const detectedMentions = (() => {
     const found: MentionPlugin[] = [];
-    const re = /(?:^|[\s(])@([a-z0-9][a-z0-9-]*)/g;
+    const re = /(?:^|[\s(])@([A-Za-z0-9][A-Za-z0-9_-]*)/g;
     let match: RegExpExecArray | null;
     while ((match = re.exec(message.content)) !== null) {
       const token = match[1];
@@ -773,7 +796,7 @@ function ChatForm({
           prevChar === "\n" ||
           prevChar === "(" ||
           prevChar === "\t") &&
-        /^[a-z0-9-]*$/i.test(fragment)
+        /^[a-z0-9_-]*$/i.test(fragment)
       ) {
         setMentionStart(at);
         setMentionQuery(fragment);

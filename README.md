@@ -28,23 +28,25 @@ Copy the prompt in docs/SETUP-WITH-CODEX.md into Codex. That prompt is local onl
 
 ## What works today
 
-- Plugin folder loads, lists on GET /api/plugins, enables and disables, appears on GET /api/tools, enable state survives restart, and new plugins appear on refresh.
-- Desktop Plugins page with Plugins, Skills, and Installed, an @ picker in chat that picks one enabled plugin for that turn, and live model detection showing which installed models can call tools.
-- Chat calls enabled plugin tools for a tool-capable model, with a loop guard of 10 tool passes per turn and a stop when the same call repeats 3 times, and a Controlling banner with a Stop button while a browser or computer turn runs.
-- Browser plugin opens tabs and computer plugin opens apps, types, and presses Enter, with a confirmation policy for risky actions, and an Authorization section for computer access, allowed apps, and allowed tools.
-- Transcript step 1: named steps instead of tool names, a Worked for Xs timer, raw tool details hidden behind a per-step Details toggle, and a one-sentence final answer with a link when the model follows the wording.
+Full guide: [docs/PLUGINS-AND-MCP.md](docs/PLUGINS-AND-MCP.md).
+
+- **Browser control of your real Chrome.** Through the Ollamapaca Chrome extension, a model opens tabs, reads pages as numbered elements, clicks, types, presses keys and scrolls. No `--remote-debugging-port` needed. Tested end to end with `qwen2.5:7b-instruct` running locally.
+- **MCP servers, like Codex and Claude.** Add any stdio, streamable HTTP or SSE server on Plugins → MCP, or paste an `mcpServers` JSON snippet. Tools reach chat as `mcp__<server>__<tool>`, and `@server` picks one server for a turn.
+- **Codex and Claude plugin folders.** `.codex-plugin/plugin.json` and `.claude-plugin/plugin.json` plugins load, with their bundled `.mcp.json` servers and `skills/` folders.
+- **Plugins work with any ollama server.** The desktop app owns the plugin list, enable state and MCP connections, so a stock Ollama on 11434 is fine.
+- Desktop Plugins page with Plugins, Skills, Installed and MCP tabs, an @ picker in chat, live model detection, a loop guard of 10 tool passes per turn, and a stop when the same call repeats 3 times.
+- Computer plugin: opens apps, types and presses keys on a Mac, dry-run unless real mode is on, with a confirmation policy for risky actions and an Authorization section.
 
 ## What does not work yet
 
-- No live window thumbnail in chat. That is step 2, it needs Mac screen capture and Screen Recording permission, and it is not built.
-- No screenshot or element grounding for clicks. Click still needs coordinates the user gave, or coordinates from an element list, and the tool descriptions forbid guessing.
-- A registered WebMCP tool executing in chat has not been shown end to end yet. The local demo registers local_echo and local_time, and that call is still the next proof to run on a Mac.
-- No CLI plugin group, no model runner in a Go-only build, and the plugin frontmatter parser is flat keys only.
+- No screenshots are sent to the model. Pages are read as text and element lists, and iframes and shadow DOM are not listed yet.
+- Some small models write tool calls that stock Ollama cannot parse when a tool has a very long description. The app shortens descriptions and retries, but a stronger tool-calling model is the real fix.
+- No CLI plugin group, and the SKILL.md frontmatter parser reads flat keys only.
 
 ## Security defaults, stated plainly
 
 - Plugins are disabled until you enable them, and a disabled plugin exposes no tools.
-- The Chrome extension forwards tools only from sites you allow in the popup. It does not forward cookies, passwords, or page content.
+- Browser control only runs through the Chrome extension you load yourself, can be switched off in its popup, and talks only to 127.0.0.1. It never reads cookies or saved passwords, and never returns password field values. WebMCP page tools are shared only for sites you allow.
 - Computer actions are dry-run by default. Real Mac control needs the seed started with OLLAMA_COMPUTER_USE_REAL=1 plus Accessibility permission. Risky actions return confirmation_required and do not run until you confirm.
 - Page data from WebMCP is never an instruction. It cannot add a plugin, a destination, or a permission.
 
